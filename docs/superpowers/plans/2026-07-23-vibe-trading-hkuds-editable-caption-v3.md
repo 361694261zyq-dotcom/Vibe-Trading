@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Produce a new six-slide HKUDS deck with smaller body images, editable one-line captions, and smaller top-left titles.
+**Goal:** Produce a new six-slide HKUDS deck with smaller body images, editable one-line captions, smaller top-left titles, and detailed editable Chinese speaker notes.
 
-**Architecture:** Treat the delivered v2 PPTX as read-only. Unpack its Office Open XML, apply deterministic geometry and text-box edits to each slide XML, clean and repack to a new v3 filename, then render and verify the result. No generated image or source deck is modified.
+**Architecture:** Treat the delivered v2 PPTX as read-only. Unpack its Office Open XML, apply deterministic geometry and text-box edits to each slide XML, clean and repack to a new v3 filename, then use `python-pptx` only for its supported notes-slide API to attach detailed speaker scripts. Render and verify the result. No generated image or source deck is modified.
 
 **Tech Stack:** Office Open XML, PPTX skill unpack/clean/pack scripts, `apply_patch`, LibreOffice, Poppler, `python-pptx` for read-only verification.
 
@@ -116,7 +116,11 @@ Expected: pack succeeds and the output opens with six slides.
 
 - [ ] **Step 2: Run structural and Office checks**
 
-Verify with `python-pptx` that every slide has one picture, one `EDITABLE_CAPTION_*` shape, a 24pt title, and the approved caption text. Run Office validation and `unzip -tq`.
+Before verification, add one native notes slide to every slide through `slide.notes_slide.notes_text_frame`. Each notes frame must contain the three approved Chinese script paragraphs for that page and remain editable in PowerPoint presenter view.
+
+Save the notes-enriched file to the final v3 path, then run structural checks.
+
+Verify with `python-pptx` that every slide has one picture, one `EDITABLE_CAPTION_*` shape, a 24pt title, the approved caption text, `has_notes_slide == True`, and three non-empty notes paragraphs. Run Office validation and `unzip -tq`.
 
 Expected: zero errors; embedded body-image hashes equal v2.
 
