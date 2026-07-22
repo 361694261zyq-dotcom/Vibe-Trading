@@ -123,15 +123,17 @@ The slide title names the problem solved, not merely the module. A small source 
 ### 7.2 Body Image
 
 - 1902 × 827 PNG, placed with the same geometry as the current short deck.
+- The six-slide short deck is the visual-quality floor. Each capability receives a bespoke image-generation illustration, not a repeated three-column card template.
 - Restrained editorial-infographic style:
-  - dark brown line work;
+  - dark brown hand-drawn line work;
   - muted sage;
   - dusty rose;
   - HKU red accents;
-  - warm neutral cards and generous whitespace.
-- Body labels are deterministically rendered from the bilingual content contract. This avoids hallucinated words, mistranslations, and unreadable generated text.
-- Reuse the visual grammar of the existing short deck—rounded cards, thin connectors, simple node diagrams, restrained status capsules—but create new body images.
-- Vary the internal diagram by capability: pipeline, lifecycle, matrix, tiers, constellation, stack, or comparison. The Motivation/Challenges/Solution/Outcome logic stays visible on every capability slide.
+  - warm white background and generous whitespace.
+- Every illustration communicates Motivation → Challenges → Solution as one integrated visual sequence using scenes, objects, paths, barriers, and resolved evidence. It must not look like a generic dashboard or a slide full of boxes.
+- Images contain no words, letters, numbers, logo, title, watermark, or fabricated interface text. This preserves language accuracy and lets the same polished visual logic serve both language versions.
+- Chinese and English decks separately compose the body with the illustration plus native editable language-specific text. The one-line text block under each image explicitly names Motivation, Challenges, and Solution; speaker notes expand all three and the Outcome.
+- Reuse the visual grammar of the existing short deck—fine connectors, simple characters and research objects, restrained cards and folders, and evidence-oriented storytelling—while creating new scenes for every slide.
 
 ## 8. Bilingual Mapping
 
@@ -155,7 +157,7 @@ The slide title names the problem solved, not merely the module. A small source 
 
 1. 34 slides in both files; same ordering and language-neutral geometry.
 2. Exact paired filenames; existing short decks remain byte-identical.
-3. One body image, one native title, and one native editable caption per slide.
+3. One bespoke body illustration, one native title, and one native editable Motivation/Challenges/Solution caption per slide.
 4. Speaker notes: 2 paragraphs on cover, 3 paragraphs elsewhere.
 5. English native text and notes contain no CJK characters; the official HKU logo is the only bilingual graphic.
 6. Forbidden-term scan across slide XML, notes XML, and image-source contract.

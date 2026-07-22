@@ -2,9 +2,9 @@
 
 **Goal:** Deliver a 34-slide Chinese/English HKUDS presentation pair in which every capability is explained through Motivation → Challenges → Solution → Outcome, using the current local README and the existing HKU baseboard.
 
-**Architecture:** A single bilingual content contract drives deterministic 1902×827 infographic images, a template-based PowerPoint builder, speaker notes, and pair verification. The builder starts from the current HKUDS short deck so the official logo and header rule remain inherited layout objects. Existing user files are read-only.
+**Architecture:** A single bilingual content contract drives bespoke 1902×827 image-generation illustrations, editable Motivation/Challenges/Solution caption strips, a template-based PowerPoint builder, speaker notes, and pair verification. The builder starts from the current HKUDS short deck so the official logo and header rule remain inherited layout objects. Existing user files are read-only.
 
-**Runtime:** Node.js + Sharp for SVG-to-PNG rendering; Python 3.12 + python-pptx/lxml for template-based deck assembly and verification; LibreOffice + Poppler for rendering; existing `pptx` skill validators for Office Open XML checks.
+**Runtime:** Built-in image generation for bespoke text-free illustrations; Python 3.12 + python-pptx/lxml for template-based deck assembly and verification; LibreOffice + Poppler for rendering; existing `pptx` skill validators for Office Open XML checks.
 
 ## Task 1: Freeze the bilingual content contract
 
@@ -26,28 +26,27 @@
 NODE_PATH="$BUNDLED_NODE_MODULES" node build/ppt/full_feature_hkuds_20260723/work/content_contract.js --check
 ```
 
-## Task 2: Render exact bilingual body images
+## Task 2: Generate bespoke short-deck-quality body illustrations
 
 **Files**
 
-- Create: `build/ppt/full_feature_hkuds_20260723/work/render_body_images.js`
-- Create: `build/ppt/full_feature_hkuds_20260723/assets/cn/slide_01.png` through `slide_34.png`
-- Create: `build/ppt/full_feature_hkuds_20260723/assets/en/slide_01.png` through `slide_34.png`
-- Create: `build/ppt/full_feature_hkuds_20260723/assets/render_manifest.json`
+- Create: `build/ppt/full_feature_hkuds_20260723/work/image_prompt_manifest.json`
+- Create: `build/ppt/full_feature_hkuds_20260723/assets/illustrations/slide_01.png` through `slide_34.png`
+- Create: `build/ppt/full_feature_hkuds_20260723/assets/image_generation_manifest.json`
 
 **Actions**
 
-1. Render each body from SVG to a 1902×827 PNG using Sharp.
-2. Use a restrained warm-white/dark-brown/sage/dusty-rose/HKU-red palette.
-3. Keep the four problem-solving zones visible on every capability slide.
-4. Vary internal diagrams across pipelines, lifecycles, matrices, tiers, stacks, and constellations.
-5. Keep text deterministic and sourced only from the content contract.
+1. Use the polished six-slide deck images as style references.
+2. Generate one bespoke 1902×827 illustration per slide using a restrained warm-white/dark-brown/sage/dusty-rose/HKU-red palette.
+3. Communicate Motivation → Challenges → Solution through one integrated scene, not a repeated panel template.
+4. Generate no text, numbers, logo, watermark, or fabricated interface copy inside the image.
+5. Inspect every result for subject accuracy, composition, accidental text, and consistency before deck assembly.
 
 **Verification**
 
 ```bash
-file build/ppt/full_feature_hkuds_20260723/assets/{cn,en}/slide_*.png
-sips -g pixelWidth -g pixelHeight build/ppt/full_feature_hkuds_20260723/assets/{cn,en}/slide_*.png
+file build/ppt/full_feature_hkuds_20260723/assets/illustrations/slide_*.png
+sips -g pixelWidth -g pixelHeight build/ppt/full_feature_hkuds_20260723/assets/illustrations/slide_*.png
 ```
 
 ## Task 3: Build both PowerPoint files from the HKUDS template
@@ -63,7 +62,7 @@ sips -g pixelWidth -g pixelHeight build/ppt/full_feature_hkuds_20260723/assets/{
 1. Open the current Chinese short deck as the immutable template.
 2. Remove its six content slides while retaining slide masters, layouts, theme, and HKU logo asset.
 3. Add 34 slides from the HKUDS content layout.
-4. Add one body image, one editable upper-left title, and one editable caption to each slide.
+4. Add one body illustration, one editable upper-left title, and one editable Motivation/Challenges/Solution caption to each slide.
 5. Add bilingual speaker notes with the required paragraph counts.
 6. Set metadata and stable shape names for later verification.
 
