@@ -34,7 +34,17 @@ logger = logging.getLogger(__name__)
 
 _OUTPUT_COLUMNS = ["open", "high", "low", "close", "volume"]
 # Project interval -> broker ``period`` token (both connectors share this set).
-_PERIOD_MAP = {"1D": "1d", "1H": "1h", "5m": "5m", "15m": "15m", "30m": "30m", "1m": "1m"}
+# ``1h``/``1d`` alias the project-style tokens; ``1m`` vs ``1M`` stays case-sensitive.
+_PERIOD_MAP = {
+    "1D": "1d",
+    "1d": "1d",
+    "1H": "1h",
+    "1h": "1h",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1m": "1m",
+}
 
 
 def _resolve_broker():
@@ -140,7 +150,16 @@ class DataLoader:
         if sdk is None:
             return {}
 
-        period = _PERIOD_MAP.get(str(interval).strip(), "1d")
+        period = _PERIOD_MAP.get(str(interval).strip())
+        if period is None:
+            # Do not silently substitute daily bars for an unsupported interval
+            # (e.g. runner ``4H`` used to fall through to ``1d``).
+            logger.warning(
+                "india broker only supports %s; rejecting interval=%r",
+                sorted(_PERIOD_MAP),
+                interval,
+            )
+            return {}
         # Request enough bars to cover the window (business days + headroom).
         span_days = max((pd.Timestamp(end_date) - pd.Timestamp(start_date)).days, 1)
         limit = min(max(span_days, 30), 2000)

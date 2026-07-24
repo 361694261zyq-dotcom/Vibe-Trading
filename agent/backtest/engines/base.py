@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from backtest.constraints import apply_constraints_frame, load_constraints
 from backtest.loaders.rsshub_events import (
     FeedSpec,
     RSSHubEventProvider,
@@ -239,15 +240,24 @@ def _load_optimizer(config: Dict[str, Any]) -> Optional[Callable]:
         Optimizer callable, or None.
     """
     opt_name = config.get("optimizer")
+    constraints = load_constraints(config)
     if not opt_name:
+        if constraints:
+            print("[WARN] 'constraints' only act on optimizer output, "
+                  "set 'optimizer' to use them; ignoring")
         return None
     opt_params = config.get("optimizer_params") or {}
     try:
         mod = importlib.import_module(f"backtest.optimizers.{opt_name}")
-        return lambda ret, pos, dates: mod.optimize(ret, pos, dates, **opt_params)
     except (ImportError, AttributeError) as e:
         print(f"[WARN] Failed to load optimizer '{opt_name}': {e}, falling back to equal weight")
         return None
+
+    def optimize(ret: pd.DataFrame, pos: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.DataFrame:
+        out = mod.optimize(ret, pos, dates, **opt_params)
+        return apply_constraints_frame(out, constraints)
+
+    return optimize
 
 
 def _normalise_fundamental_fields(config: Dict[str, Any]) -> dict[str, list[str]]:
@@ -360,6 +370,14 @@ class BaseEngine(ABC):
         self.config = config
         self.initial_capital: float = config.get("initial_cash", 1_000_000)
         self.default_leverage: float = config.get("leverage", 1.0)
+        # Markets that clear at or below zero (e.g. EU day-ahead power) opt in
+        # to opening on negative-price bars. Default False preserves the legacy
+        # "reject any open_price <= 0" behavior. An exactly-zero open is always
+        # rejected (undefined size = notional / price); negatives are handled by
+        # abs()-based sizing and margin below.
+        self.allow_nonpositive_prices: bool = bool(
+            config.get("allow_nonpositive_prices", False)
+        )
         self.capital: float = self.initial_capital
         self.positions: Dict[str, Position] = {}
         self.trades: List[TradeRecord] = []
@@ -439,14 +457,24 @@ class BaseEngine(ABC):
     def _calc_margin(
         self, symbol: str, size: float, price: float, leverage: float,
     ) -> float:
-        """Margin (collateral) required for a position."""
-        return size * price / leverage
+        """Margin (collateral) required for a position.
+
+        ``abs(price)`` so collateral stays positive when the entry price is
+        negative; for the usual positive price this is unchanged.
+        """
+        return size * abs(price) / leverage
 
     def _calc_raw_size(
         self, symbol: str, target_notional: float, price: float,
     ) -> float:
-        """Convert target notional exposure to number of units/contracts."""
-        return target_notional / price
+        """Convert target notional exposure to number of units/contracts.
+
+        Size is a positive magnitude — direction carries the sign elsewhere —
+        so divide by ``abs(price)``; a negative entry price must not flip the
+        size negative (which the ``size <= 0`` guard would then reject). For a
+        positive price this is unchanged.
+        """
+        return target_notional / abs(price)
 
     def _leverage_for_symbol(self, symbol: str) -> float:
         """Return leverage used to size and margin one symbol."""
@@ -577,6 +605,22 @@ class BaseEngine(ABC):
         m.update(benchmark_metadata)
         m["by_symbol"] = by_symbol_stats(self.trades)
         m["by_exit_reason"] = by_exit_reason_stats(self.trades)
+
+        # Portfolio Studio: per-rebalance weight-drift notes from the target
+        # positions. Optimizer-agnostic, so they land for the baseline too.
+        from backtest.rebalance_notes import (
+            compute_rebalance_notes,
+            render_rebalance_notes_markdown,
+            write_rebalance_notes,
+        )
+        rebalance_notes = compute_rebalance_notes(target_pos)
+        write_rebalance_notes(run_dir / "artifacts" / "rebalance_notes.json", rebalance_notes)
+        (run_dir / "artifacts" / "rebalance_notes.md").write_text(
+            render_rebalance_notes_markdown(rebalance_notes), encoding="utf-8"
+        )
+        m["rebalance_count"] = rebalance_notes["summary"]["rebalance_count"]
+        m["rebalance_turnover_mean"] = rebalance_notes["summary"]["turnover_mean"]
+        m["rebalance_turnover_max"] = rebalance_notes["summary"]["turnover_max"]
 
         # 7. Validation (optional — triggered by config["validation"])
         if config.get("validation"):
@@ -933,7 +977,10 @@ class BaseEngine(ABC):
         if not self.can_execute(symbol, direction, bar):
             return None
         open_price = float(bar.get("open", bar.get("close", 0)))
-        if open_price <= 0:
+        # Zero is always rejected (size = notional / price is undefined);
+        # negatives are rejected unless this engine opted into non-positive
+        # prices, in which case abs()-based sizing/margin below handle them.
+        if open_price == 0 or (open_price < 0 and not self.allow_nonpositive_prices):
             return None
         price = self.apply_slippage(open_price, direction)
         leverage = self._leverage_for_symbol(symbol)

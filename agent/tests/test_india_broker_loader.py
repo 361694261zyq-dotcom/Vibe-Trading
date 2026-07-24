@@ -79,3 +79,40 @@ def test_error_envelope_yields_no_data(monkeypatch) -> None:
     monkeypatch.setattr(mod, "_resolve_broker", lambda: ("dhan", _ErrSDK()))
     loader = DataLoader()
     assert loader.fetch(["TCS.NS"], "2024-04-01", "2024-04-30") == {}
+
+
+def test_unsupported_interval_does_not_silently_fetch_daily(monkeypatch) -> None:
+    """Runner ``4H`` must not fall through to broker period ``1d``."""
+    fake = _FakeSDK()
+    monkeypatch.setattr(mod, "_resolve_broker", lambda: ("shoonya", fake))
+    loader = DataLoader()
+    assert loader.fetch(["RELIANCE.NS"], "2024-04-01", "2024-04-30", interval="4H") == {}
+    assert fake.calls == []
+
+
+def test_supported_1h_still_maps(monkeypatch) -> None:
+    fake = _FakeSDK()
+    monkeypatch.setattr(mod, "_resolve_broker", lambda: ("shoonya", fake))
+    loader = DataLoader()
+    out = loader.fetch(["RELIANCE.NS"], "2024-04-01", "2024-04-30", interval="1H")
+    assert "RELIANCE.NS" in out
+    assert fake.calls[0]["period"] == "1h"
+
+
+def test_lowercase_1h_maps_like_project_token(monkeypatch) -> None:
+    """Connector-style ``1h`` must map the same as project ``1H``."""
+    fake = _FakeSDK()
+    monkeypatch.setattr(mod, "_resolve_broker", lambda: ("shoonya", fake))
+    loader = DataLoader()
+    out = loader.fetch(["RELIANCE.NS"], "2024-04-01", "2024-04-30", interval="1h")
+    assert "RELIANCE.NS" in out
+    assert fake.calls[0]["period"] == "1h"
+
+
+def test_lowercase_1d_maps_to_daily(monkeypatch) -> None:
+    fake = _FakeSDK()
+    monkeypatch.setattr(mod, "_resolve_broker", lambda: ("shoonya", fake))
+    loader = DataLoader()
+    out = loader.fetch(["RELIANCE.NS"], "2024-04-01", "2024-04-30", interval="1d")
+    assert "RELIANCE.NS" in out
+    assert fake.calls[0]["period"] == "1d"
