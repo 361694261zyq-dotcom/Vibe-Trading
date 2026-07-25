@@ -245,10 +245,23 @@ def _ths_datetime(val: Any) -> str:
         ts = pd.to_datetime(float(val), unit="D", origin="1899-12-30", errors="coerce")
         if pd.notna(ts):
             return ts.strftime("%Y-%m-%d %H:%M:%S")
+    # load_dataframe uses dtype=str; Excel serials arrive as "44927" / "44927.5".
+    text = str(val).strip()
+    if text and not any(ch in text for ch in "/-:"):
+        try:
+            serial = float(text)
+        except ValueError:
+            serial = None
+        else:
+            # Civil day serials; YYYYMMDD ints are >= 19_000_001.
+            if 1.0 <= serial < 100_000.0:
+                ts = pd.to_datetime(serial, unit="D", origin="1899-12-30", errors="coerce")
+                if pd.notna(ts):
+                    return ts.strftime("%Y-%m-%d %H:%M:%S")
     ts = pd.to_datetime(val, errors="coerce")
     if pd.notna(ts):
         return ts.strftime("%Y-%m-%d %H:%M:%S")
-    return str(val).strip()
+    return text
 
 
 def parse_eastmoney(df: pd.DataFrame) -> list[TradeRecord]:
@@ -333,7 +346,41 @@ def _futu_datetime(date_val: Any, time_val: Any) -> str:
                     return ts.strftime("%Y-%m-%d %H:%M:%S")
                 # Numeric Excel date + string/clock Time column.
                 return f"{ts.strftime('%Y-%m-%d')} {str(time_val).strip()}".strip()
-    date = "" if date_val is None or (isinstance(date_val, float) and pd.isna(date_val)) else str(date_val).strip()
+    # load_dataframe uses dtype=str; Excel serial dates arrive as "45321" / "45321.0".
+    date_text = (
+        ""
+        if date_val is None or (isinstance(date_val, float) and pd.isna(date_val))
+        else str(date_val).strip()
+    )
+    if date_text and not any(ch in date_text for ch in "/-:"):
+        try:
+            serial = float(date_text)
+        except ValueError:
+            serial = None
+        else:
+            if 1.0 <= serial < 100_000.0:
+                frac = 0.0
+                time_is_frac = False
+                time_text = (
+                    ""
+                    if time_val is None or (isinstance(time_val, float) and pd.isna(time_val))
+                    else str(time_val).strip()
+                )
+                if time_text and not any(ch in time_text for ch in "/-:"):
+                    try:
+                        candidate = float(time_text)
+                    except ValueError:
+                        candidate = None
+                    else:
+                        if 0.0 <= candidate < 1.0:
+                            frac = candidate
+                            time_is_frac = True
+                ts = pd.to_datetime(serial + frac, unit="D", origin="1899-12-30", errors="coerce")
+                if pd.notna(ts):
+                    if time_is_frac or not time_text:
+                        return ts.strftime("%Y-%m-%d %H:%M:%S")
+                    return f"{ts.strftime('%Y-%m-%d')} {time_text}".strip()
+    date = date_text
     time = "" if time_val is None or (isinstance(time_val, float) and pd.isna(time_val)) else str(time_val).strip()
     return f"{date} {time}".strip()
 
@@ -407,9 +454,11 @@ def parse_generic(df: pd.DataFrame) -> list[TradeRecord]:
         if sym_col and _is_empty_code(row.get(sym_col)):
             continue
         if dt_col:
-            dt = str(row.get(dt_col, "")).strip()
+            raw_dt = row.get(dt_col, "")
+            dt = _generic_datetime_cell(raw_dt)
         elif date_col:
-            dt = str(row.get(date_col, "")).strip()
+            raw_dt = row.get(date_col, "")
+            dt = _generic_datetime_cell(raw_dt)
         else:
             dt = ""
         symbol = str(row.get(sym_col, "")).strip() if sym_col else ""
@@ -430,6 +479,33 @@ def parse_generic(df: pd.DataFrame) -> list[TradeRecord]:
             market=market,
         ))
     return records
+
+
+def _generic_datetime_cell(val: Any) -> str:
+    """Normalize a generic datetime/date cell; Excel serials become ISO datetime."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    if pd.api.types.is_number(val) and not isinstance(val, (bool,)):
+        serial = float(val)
+        if 1.0 <= serial < 100_000.0:
+            ts = pd.to_datetime(serial, unit="D", origin="1899-12-30", errors="coerce")
+            if pd.notna(ts):
+                return ts.strftime("%Y-%m-%d %H:%M:%S")
+    text = str(val).strip()
+    if text and not any(ch in text for ch in "/-:"):
+        try:
+            serial = float(text)
+        except ValueError:
+            serial = None
+        else:
+            if 1.0 <= serial < 100_000.0:
+                ts = pd.to_datetime(serial, unit="D", origin="1899-12-30", errors="coerce")
+                if pd.notna(ts):
+                    return ts.strftime("%Y-%m-%d %H:%M:%S")
+    ts = pd.to_datetime(val, errors="coerce")
+    if pd.notna(ts):
+        return ts.strftime("%Y-%m-%d %H:%M:%S")
+    return text
 
 
 def _infer_market_from_symbol(symbol: str) -> str:

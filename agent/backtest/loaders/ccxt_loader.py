@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 _INTERVAL_MAP = {
     "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
-    "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M",
+    "1H": "1h", "1h": "1h", "4H": "4h", "4h": "4h",
+    "1D": "1d", "1d": "1d", "1W": "1w", "1w": "1w", "1M": "1M",
 }
 
 _TIMEFRAME_DELTA = {
@@ -408,9 +409,12 @@ class DataLoader:
             )
 
         frame = pd.DataFrame({
+            # Binance settlement timestamps carry millisecond jitter
+            # (e.g. 08:00:00.011); round to the second so they align with
+            # bar timestamps instead of failing the missing-settlement check.
             "trade_date": pd.to_datetime(
                 [row["timestamp"] for row in rows], unit="ms"
-            ),
+            ).round("s"),
             "funding_rate": pd.to_numeric(
                 [row["fundingRate"] for row in rows], errors="raise"
             ),
