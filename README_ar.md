@@ -926,7 +926,7 @@ vibe-trading serve --port 8899
 
 للتطوير على localhost، يبقي `vibe-trading serve` سير المتصفح بسيطاً. لأي عميل غير محلي، تتطلب نقاط API الحساسة `API_AUTH_KEY`؛ استخدم `Authorization: Bearer <key>` لطلبات JSON/الرفع. تتعامل Web UI مع تدفقات Browser EventSource بعد إدخال المفتاح نفسه مرة واحدة في Settings.
 
-الأدوات القادرة على shell (`bash` / `background_run`) مفعّلة فقط لواجهة CLI المحلية التفاعلية. أما بقية الأسطح — واجهة HTTP/SSE و MCP server على **جميع** وسائط النقل (بما في ذلك stdio) — فتبقى معطّلة ما لم تفعّلها صراحة عبر `VIBE_TRADING_ENABLE_SHELL_TOOLS=1` (أو تمرير `--enable-shell-tools` إلى `vibe-trading-mcp`). نوع وسيط النقل لا يمنح صلاحية shell ضمنيًا أبدًا. قارئات المستندات والسجلات محدودة افتراضياً بجذور الرفع/الاستيراد؛ ضع الملفات تحت `agent/uploads` أو `agent/runs` أو `./uploads` أو `./data` أو `~/.vibe-trading/uploads` أو `~/.vibe-trading/imports`، أو أضف دليلاً مخصصاً عبر `VIBE_TRADING_ALLOWED_FILE_ROOTS`.
+الأدوات القادرة على shell (`bash` / `background_run` / `cancel_background`) مفعّلة فقط لواجهة CLI المحلية التفاعلية. أما بقية الأسطح — واجهة HTTP/SSE و MCP server على **جميع** وسائط النقل (بما في ذلك stdio) — فتبقى معطّلة ما لم تفعّلها صراحة عبر `VIBE_TRADING_ENABLE_SHELL_TOOLS=1` (أو تمرير `--enable-shell-tools` إلى `vibe-trading-mcp`). نوع وسيط النقل لا يمنح صلاحية shell ضمنيًا أبدًا. قارئات المستندات والسجلات محدودة افتراضياً بجذور الرفع/الاستيراد؛ ضع الملفات تحت `agent/uploads` أو `agent/runs` أو `./uploads` أو `./data` أو `~/.vibe-trading/uploads` أو `~/.vibe-trading/imports`، أو أضف دليلاً مخصصاً عبر `VIBE_TRADING_ALLOWED_FILE_ROOTS`.
 
 ### إعدادات Web UI
 
