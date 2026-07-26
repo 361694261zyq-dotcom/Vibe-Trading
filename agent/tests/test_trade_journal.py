@@ -19,6 +19,7 @@ from src.tools.trade_journal_parsers import (
     _infer_market_from_symbol,
     _normalize_side,
     _qualify_a_share,
+    load_dataframe,
     parse_tonghuashun,
     parse_eastmoney,
     parse_futu,
@@ -202,6 +203,18 @@ def test_parse_file_unknown_raises(tmp_path: Path) -> None:
     csv.write_text("foo,bar\n1,2\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Unrecognized"):
         parse_file(csv)
+
+
+def test_load_dataframe_accepts_utf16_bom_csv(tmp_path: Path) -> None:
+    # Excel "CSV UTF-16" / Unicode CSV exports a BOM; previously every
+    # encoding attempt raised UnicodeDecodeError and the load failed.
+    csv = tmp_path / "futu_utf16.csv"
+    body = "Date,Symbol,Side,Quantity,Price\n2024-01-02,AAPL,Buy,10,100\n"
+    csv.write_bytes(body.encode("utf-16"))
+    df = load_dataframe(csv)
+    assert list(df.columns) == ["Date", "Symbol", "Side", "Quantity", "Price"]
+    assert detect_format(df) == "futu"
+    assert df.iloc[0]["Symbol"] == "AAPL"
 
 
 @pytest.mark.parametrize(
