@@ -950,7 +950,7 @@ vibe-trading serve --port 8899
 
 对于 localhost 开发，`vibe-trading serve` 会保持浏览器工作流简单。对任何非本地客户端，敏感 API endpoints 都要求 `API_AUTH_KEY`；JSON/upload 请求请使用 `Authorization: Bearer <key>`。浏览器 EventSource streams 会在你于 Settings 中输入同一个 key 后由 Web UI 处理。
 
-Shell-capable tools（`bash` / `background_run`）仅对交互式本地 CLI 启用。其他所有入口 —— HTTP/SSE API 以及 MCP server 的**所有** transport（含 stdio）—— 默认关闭，除非你显式设置 `VIBE_TRADING_ENABLE_SHELL_TOOLS=1`（或给 `vibe-trading-mcp` 传 `--enable-shell-tools`）。transport 类型永远不会隐式授予 shell 访问权限。文档和日志读取器默认限制在 upload/import roots 内；请将文件放在 `agent/uploads`、`agent/runs`、`./uploads`、`./data`、`~/.vibe-trading/uploads` 或 `~/.vibe-trading/imports` 下，或通过 `VIBE_TRADING_ALLOWED_FILE_ROOTS` 添加专用目录。
+Shell-capable process tools（`bash` / `background_run` / `cancel_background`）仅对交互式本地 CLI 启用。其他所有入口 —— HTTP/SSE API 以及 MCP server 的**所有** transport（含 stdio）—— 默认关闭，除非你显式设置 `VIBE_TRADING_ENABLE_SHELL_TOOLS=1`（或给 `vibe-trading-mcp` 传 `--enable-shell-tools`）。transport 类型永远不会隐式授予 shell 访问权限。`cancel_background` 只终止 `background_run` 返回的已跟踪 task ID；系统会拒绝按进程名广泛终止 Python，避免把 Vibe-Trading 自身一起终止。文档和日志读取器默认限制在 upload/import roots 内；请将文件放在 `agent/uploads`、`agent/runs`、`./uploads`、`./data`、`~/.vibe-trading/uploads` 或 `~/.vibe-trading/imports` 下，或通过 `VIBE_TRADING_ALLOWED_FILE_ROOTS` 添加专用目录。
 
 ### Web UI Settings
 

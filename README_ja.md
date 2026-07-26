@@ -923,7 +923,7 @@ Interactive docs: `http://localhost:8899/docs`
 
 localhost 開発では、`vibe-trading serve` は browser workflow を簡単に保ちます。非ローカル client では、sensitive API endpoints に `API_AUTH_KEY` が必要です。JSON/upload requests には `Authorization: Bearer <key>` を使ってください。Browser EventSource streams は、Settings で同じ key を一度入力した後、Web UI が処理します。
 
-Shell-capable tools（`bash` / `background_run`）はインタラクティブな local CLI でのみ有効です。それ以外のすべての面 — HTTP/SSE API と MCP server の**すべての** transport（stdio を含む）— は、`VIBE_TRADING_ENABLE_SHELL_TOOLS=1` を明示的に設定する（または `vibe-trading-mcp` に `--enable-shell-tools` を渡す）まで無効のままです。transport の種類が暗黙に shell アクセスを許可することはありません。Document と journal readers は既定で upload/import roots に制限されます。ファイルは `agent/uploads`、`agent/runs`、`./uploads`、`./data`、`~/.vibe-trading/uploads`、`~/.vibe-trading/imports` の下に置くか、`VIBE_TRADING_ALLOWED_FILE_ROOTS` で専用 directory を追加してください。
+Shell-capable process tools（`bash` / `background_run` / `cancel_background`）はインタラクティブな local CLI でのみ有効です。それ以外のすべての面 — HTTP/SSE API と MCP server の**すべての** transport（stdio を含む）— は、`VIBE_TRADING_ENABLE_SHELL_TOOLS=1` を明示的に設定する（または `vibe-trading-mcp` に `--enable-shell-tools` を渡す）まで無効のままです。transport の種類が暗黙に shell アクセスを許可することはありません。Document と journal readers は既定で upload/import roots に制限されます。ファイルは `agent/uploads`、`agent/runs`、`./uploads`、`./data`、`~/.vibe-trading/uploads`、`~/.vibe-trading/imports` の下に置くか、`VIBE_TRADING_ALLOWED_FILE_ROOTS` で専用 directory を追加してください。
 
 ### Web UI Settings
 
