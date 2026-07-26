@@ -19,6 +19,14 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Verify hash-locked dependencies
+        run: >-
+          pip install
+          --dry-run
+          --ignore-installed
+          --require-hashes
+          -r requirements-lock.txt
+
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
