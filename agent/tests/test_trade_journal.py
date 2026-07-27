@@ -120,6 +120,9 @@ def test_normalize_side_rejects_missing_or_unknown(raw: object) -> None:
         ("AAPL", "us"),
         ("BTC-USDT", "crypto"),
         ("ETH-USD", "crypto"),
+        ("BTCUSDT", "crypto"),
+        ("ethusdc", "crypto"),
+        ("SOLBUSD", "crypto"),
         ("123456", "other"),
     ],
 )

@@ -517,6 +517,13 @@ def _infer_market_from_symbol(symbol: str) -> str:
         return "china_a"
     if "-" in s and any(quote in s for quote in ("USDT", "USDC", "BTC", "USD")):
         return "crypto"
+    # Binance-style concatenated pairs (BTCUSDT) are purely alphabetic, so the
+    # isalpha() US-equity branch below would mis-label them without this check.
+    for quote in ("USDT", "USDC", "BUSD"):
+        if len(s) > len(quote) and s.endswith(quote):
+            base = s[: -len(quote)]
+            if base.isalpha() and len(base) >= 2:
+                return "crypto"
     if s.isalpha():
         return "us"
     return "other"
