@@ -19,6 +19,7 @@ from src.tools.trade_journal_parsers import (
     _infer_market_from_symbol,
     _normalize_side,
     _qualify_a_share,
+    _to_float,
     load_dataframe,
     parse_tonghuashun,
     parse_eastmoney,
@@ -656,3 +657,35 @@ def test_parse_tonghuashun_float_code_cell() -> None:
     rec = parse_tonghuashun(df)
     assert len(rec) == 1
     assert rec[0].symbol == "600519.SH"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("$1,234.56", 1234.56),
+        ("USD 12.5", 12.5),
+        ("€99.00", 99.0),
+        ("¥1,000", 1000.0),
+        ("\u221212.5", -12.5),
+        ("CNY12.5", 12.5),
+    ],
+)
+def test_to_float_strips_currency_and_unicode_minus(raw: str, expected: float) -> None:
+    """US/EU/Asia broker cells with currency glyphs must not become 0.0."""
+    assert _to_float(raw) == expected
+
+
+def test_parse_generic_currency_price_not_zero() -> None:
+    df = pd.DataFrame([{
+        "datetime": "2024-01-02 10:00:00",
+        "symbol": "AAPL",
+        "side": "buy",
+        "quantity": "10",
+        "price": "$150.25",
+        "fee": "$1.00",
+    }])
+    rec = parse_generic(df)
+    assert len(rec) == 1
+    assert rec[0].price == 150.25
+    assert rec[0].fee == 1.0
+    assert rec[0].amount == 1502.5

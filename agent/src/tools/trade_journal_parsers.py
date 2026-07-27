@@ -9,11 +9,19 @@ Excel (.xlsx/.xls) always opens as utf-8 internally via openpyxl/xlrd.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+# Broker CSV/Excel cells often include ISO codes or currency glyphs around the
+# number (Schwab/IBKR "$1,234.56", JP/CN "¥1000"). Commas are already stripped;
+# without stripping these tokens float() fails and we silently store 0.0.
+_CURRENCY_TOKEN_RE = re.compile(
+    r"(?i)(?<![A-Za-z])(?:USDT|USDC|USD|EUR|GBP|JPY|CNY|HKD)(?![A-Za-z])|[$€£¥￥]"
+)
 
 FormatName = str  # "tonghuashun" | "eastmoney" | "futu" | "generic" | "unknown"
 
@@ -202,7 +210,8 @@ def _to_float(val: Any, default: float = 0.0) -> float:
     if val is None:
         return default
     try:
-        s = str(val).replace(",", "").strip()
+        s = str(val).strip().replace("\u2212", "-")
+        s = _CURRENCY_TOKEN_RE.sub("", s).replace(",", "").strip()
         return float(s) if s else default
     except (ValueError, TypeError):
         return default
