@@ -4,8 +4,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 4
+      interval: "monthly"
+    open-pull-requests-limit: 2
     groups:
       # Minor/patch bumps are low-risk and reviewed as a single batch; majors
       # are excluded so they still arrive individually and get real scrutiny
@@ -26,13 +26,17 @@ updates:
       # PR failed CI with ResolutionImpossible. Drop this ignore once aiofile
       # ships a release that accepts caio 0.10.
       - dependency-name: "caio"
+      # websockets is likewise capped by our tree: langgraph-sdk 0.4.2 requires
+      # websockets<16, so a bump to 16.x is unresolvable. Drop this once
+      # langgraph-sdk widens its range.
+      - dependency-name: "websockets"
 
   # Frontend npm dependencies.
   - package-ecosystem: "npm"
     directory: "/frontend"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 4
+      interval: "monthly"
+    open-pull-requests-limit: 2
     groups:
       npm-minor-patch:
         applies-to: version-updates
@@ -52,8 +56,8 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 4
+      interval: "monthly"
+    open-pull-requests-limit: 2
     groups:
       actions-minor-patch:
         applies-to: version-updates
