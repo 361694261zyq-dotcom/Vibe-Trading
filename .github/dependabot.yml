@@ -20,6 +20,12 @@ updates:
       # not an oversight. Revisit as a dedicated migration, not a dep bump.
       - dependency-name: "pandas"
         update-types: ["version-update:semver-major"]
+      # caio is capped by our own dependency tree, not by choice: aiofile
+      # 3.11.1 (latest) requires caio~=0.9.0, so any bump to caio 0.10.x makes
+      # `pip install` unresolvable. Dependabot kept proposing it and the group
+      # PR failed CI with ResolutionImpossible. Drop this ignore once aiofile
+      # ships a release that accepts caio 0.10.
+      - dependency-name: "caio"
 
   # Frontend npm dependencies.
   - package-ecosystem: "npm"
@@ -31,6 +37,16 @@ updates:
       npm-minor-patch:
         applies-to: version-updates
         update-types: ["minor", "patch"]
+    ignore:
+      # Both majors are blocked on infrastructure migrations we have not done,
+      # so they can only sit red. Same rationale as the pandas pin above:
+      # revisit each as a dedicated migration, not a dependency bump.
+      #   @vitejs/plugin-react 6.x peers vite@^8 (we are on vite 6.x).
+      #   @testing-library/jest-dom 7.x requires Node >=22 (CI/Docker use 20).
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@testing-library/jest-dom"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions workflow pins.
   - package-ecosystem: "github-actions"
