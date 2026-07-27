@@ -104,12 +104,13 @@ def load_dataframe(path: str | Path) -> pd.DataFrame:
         raise ValueError(f"Unsupported extension: {ext}")
 
     last_err: Exception | None = None
-    for enc in ("utf-8", "utf-8-sig", "gbk", "gb2312"):
+    # utf-16 covers Excel "CSV UTF-16" / Unicode exports (BOM required).
+    for enc in ("utf-8-sig", "utf-8", "utf-16", "gbk", "gb2312"):
         try:
             return pd.read_csv(p, dtype=str, encoding=enc)
         except UnicodeDecodeError as exc:
             last_err = exc
-    raise ValueError(f"Failed to decode CSV with utf-8/gbk/gb2312: {last_err}")
+    raise ValueError(f"Failed to decode CSV with utf-8/utf-16/gbk/gb2312: {last_err}")
 
 
 # ---------------- Format detection ----------------
