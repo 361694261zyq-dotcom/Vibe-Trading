@@ -639,7 +639,7 @@ vibe-trading                       # Launch interactive TUI
 vibe-trading serve --port 8899
 
 # Terminal 2: Frontend dev server
-cd frontend && npm install && npm run dev
+cd frontend && npm install && npm run dev  # Node >= 22.22 필요
 ```
 
 `http://localhost:5899`를 여세요. Frontend는 API 호출을 `localhost:8899`로 proxy합니다.

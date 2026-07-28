@@ -677,7 +677,7 @@ vibe-trading                       # Launch interactive TUI
 vibe-trading serve --port 8899
 
 # Terminal 2: Frontend dev server
-cd frontend && npm install && npm run dev
+cd frontend && npm install && npm run dev  # requires Node >= 22.22
 ```
 
 Open `http://localhost:5899`. The frontend proxies API calls to `localhost:8899`.
