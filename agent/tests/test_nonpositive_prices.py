@@ -62,17 +62,21 @@ def test_allow_keeps_negatives_rejects_exact_zero() -> None:
 def test_why_loader_drops_exact_zero_inf_downstream() -> None:
     """Pins *why* an exact-zero close is dropped at the loader, not kept.
 
-    Both the benchmark (``benchmark.py``) and the position simulation
-    (``engines/base.py``) compute per-bar returns as
-    ``close.pct_change().fillna(0.0)`` over a *raw* close series. If a ``0.00``
-    clear survived into that series, the bar *after* it divides by zero and
-    yields ``inf`` — and ``fillna(0.0)`` does not neutralize it (it fills NaN,
-    not inf), so the benchmark's ``(1 + r).prod()`` collapses to ``nan``.
+    A raw ``close.pct_change()`` over a series containing ``0.00`` yields
+    ``inf`` on the *next* bar — ``fillna(0.0)`` fills NaN, not inf — so any
+    compounded aggregate collapses to ``nan``. That is what this test
+    demonstrates, and it is why #816 stopped at negatives.
 
-    Negatives divide cleanly (engine sizing uses ``abs(price)``), so they are
-    kept; exact zero is genuinely undefined and is therefore rejected at the
-    loader *and* the engine. This test encodes that contract so the asymmetry
-    is not silently "fixed" by later relaxing the loader. See #571.
+    The production return path no longer has this hazard: #872 moved
+    ``benchmark.py`` and ``engines/base.py`` onto
+    :func:`backtest.metrics.bar_returns`, which defines a return only where the
+    prior price is strictly positive and yields ``0.0`` otherwise. See
+    ``test_nonpositive_returns.py`` for that contract.
+
+    Exact zero is still rejected at the loader, but now for the one reason that
+    survives: position sizing is ``target_notional / abs(price)``
+    (``engines/base.py:478``), which is undefined at zero. Negatives divide
+    cleanly and are therefore kept. See #571, #816, #872.
     """
     idx = pd.to_datetime(["2025-10-24", "2025-10-25", "2025-10-26", "2025-10-27"])
 

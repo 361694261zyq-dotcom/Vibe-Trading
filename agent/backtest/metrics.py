@@ -5,6 +5,7 @@ Provides annualisation helpers, trade statistics, and full metric calculation.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -68,6 +69,81 @@ def calc_bars_per_year(interval: str = "1D", source: str = "tushare") -> int:
     trading_days = _TRADING_DAYS.get(source_key, 252)
     bars_per_day = _BARS_PER_DAY.get(interval_key, {}).get(source_key, 1)
     return trading_days * bars_per_day
+
+
+# ─── Sign-safe returns ───
+
+_log = logging.getLogger(__name__)
+
+
+def bar_returns(close: Any, *, label: str = "") -> Any:
+    """Per-bar simple returns, defined only where the prior price is positive.
+
+    ``close.pct_change()`` silently assumes ``price[t-1] > 0``. That holds for
+    equities but not for instruments that can print zero or negative prices,
+    such as European day-ahead power. As the divisor approaches zero an
+    ordinary absolute move reads as an enormous *percentage* move, so a
+    compounded aggregate explodes; at exactly zero the next bar is ``inf``,
+    which ``fillna`` does not neutralise (it fills ``NaN``) and which collapses
+    ``(1 + r).prod()`` to ``nan`` (#872).
+
+    A return is therefore defined only when the previous price is finite and
+    strictly positive. Otherwise it is undefined and reported as ``0.0``,
+    never ``inf`` or ``nan``. For an all-positive series this is identical to
+    ``pct_change().fillna(0.0)``, so ordinary equity/crypto runs are unchanged.
+
+    Args:
+        close: Raw price ``Series`` or per-symbol ``DataFrame``.
+        label: Optional name used when warning about undefined bars.
+
+    Returns:
+        Returns aligned to ``close``, with the first bar ``0.0``.
+    """
+    prev = close.shift(1)
+    positive_prev = prev.where(prev > 0)
+
+    undefined = int((prev.notna() & ~(prev > 0)).to_numpy().sum())
+    if undefined:
+        # Silence is the actual hazard here: a wrong return is a wrong reported
+        # number, not a crash, so the run has to say it defaulted.
+        _log.warning(
+            "%s: %d bar(s) follow a non-positive price; their return is "
+            "undefined and reported as 0.0 (issue #872)",
+            label or "returns",
+            undefined,
+        )
+
+    # ``close / prev - 1`` is exactly the expression ``pct_change`` uses, kept
+    # verbatim so results for positive series are bit-identical, not merely
+    # equal to within floating-point error.
+    ret = close / positive_prev - 1
+    return ret.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
+def buy_and_hold_return(close: Any) -> Optional[float]:
+    """Total buy-and-hold return as a price relative, not a compounded product.
+
+    ``(1 + close.pct_change()).prod() - 1`` telescopes to ``P_end / P_start - 1``
+    only while every price is positive; once a near-zero price enters the
+    series the product diverges from what a held position actually earned. On
+    the reproduction in #872 it reported ``+39,560%`` where the price relative
+    gives ``-42.7%``. This computes the price relative directly, so the two
+    agree exactly for ordinary series and it stays honest for the rest.
+
+    Args:
+        close: Raw price series, already ``dropna()``-ed.
+
+    Returns:
+        Total return, or ``None`` when the entry price is not strictly
+        positive and no honest percentage exists.
+    """
+    if len(close) < 2:
+        return None
+    first = float(close.iloc[0])
+    last = float(close.iloc[-1])
+    if not (first > 0) or not np.isfinite(last):
+        return None
+    return last / first - 1.0
 
 
 def win_rate_and_stats(trades: List[TradeRecord]) -> Dict[str, float]:

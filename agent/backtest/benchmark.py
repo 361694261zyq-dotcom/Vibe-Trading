@@ -12,6 +12,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from backtest.loaders.yfinance_loader import DataLoader as YfinanceLoader
+from backtest.metrics import bar_returns, buy_and_hold_return
 
 
 # -------------------------------------------------------------------
@@ -89,10 +90,15 @@ def resolve_benchmark(
     if len(close) < 2:
         return None
 
-    ret_series = close.pct_change().fillna(0.0)
-    total_ret   = float((1 + ret_series).prod() - 1)
+    ret_series = bar_returns(close, label=f"benchmark {ticker}")
+    # Price relative, not the compounded product: identical while prices are
+    # positive, and it is the only one of the two that stays honest once they
+    # are not (#872).
+    total = buy_and_hold_return(close)
+    if total is None:
+        return None
 
-    return BenchmarkResult(ticker=ticker, ret_series=ret_series, total_ret=total_ret)
+    return BenchmarkResult(ticker=ticker, ret_series=ret_series, total_ret=total)
 
 
 # -------------------------------------------------------------------

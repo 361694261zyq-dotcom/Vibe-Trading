@@ -35,6 +35,7 @@ from backtest.loaders.tushare_fundamentals import (
     enrich_price_frames_with_fundamentals,
 )
 from backtest.metrics import (
+    bar_returns,
     by_exit_reason_stats,
     by_symbol_stats,
     calc_metrics,
@@ -219,7 +220,7 @@ def _align(
     # Construct DataFrames for return
     close = pd.DataFrame(close_arr, index=dates, columns=codes)
     pos = pd.DataFrame(pos_arr, index=dates, columns=codes)
-    ret = close.pct_change().fillna(0.0)
+    ret = bar_returns(close, label="engine per-symbol returns")
 
     if optimizer is not None:
         pos = optimizer(ret, pos, dates)
