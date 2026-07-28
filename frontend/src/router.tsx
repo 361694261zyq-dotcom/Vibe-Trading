@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ComponentType } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { createBrowserRouter } from "react-router";
 import { Layout } from "@/components/layout/Layout";
 
 const Home = lazy(() => import("@/pages/Home").then((m) => ({ default: m.Home })));

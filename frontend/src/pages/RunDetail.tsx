@@ -1,7 +1,7 @@
 import i18n from '@/i18n';
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router";
 import {
   AlertTriangle,
   ArrowLeft,

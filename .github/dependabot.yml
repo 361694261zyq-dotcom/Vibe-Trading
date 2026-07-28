@@ -83,18 +83,16 @@ updates:
         applies-to: version-updates
         update-types: ["minor", "patch"]
     ignore:
-      # Both majors are blocked on infrastructure migrations we have not done,
-      # so they can only sit red. Same rationale as the pandas pin above:
-      # revisit each as a dedicated migration, not a dependency bump.
-      #   @vitejs/plugin-react 6.x peers vite@^8 (we are on vite 6.x).
-      #   @testing-library/jest-dom 7.x requires Node >=22 (CI/Docker use 20).
-      #   jsdom 30.x requires Node ^22.22.2 || ^24.15.0 || >=26 (same wall);
-      #     on Node 20 it surfaces as vitest failing to start its pool workers.
+      # @vitejs/plugin-react 6.x peers vite@^8 and we are on vite 6.x, so it can
+      # only sit red. Same rationale as the pandas pin above: revisit as a
+      # dedicated migration, not a dependency bump.
+      #
+      # The jsdom and @testing-library/jest-dom majors used to be ignored here
+      # too, both blocked on Node >=22 while CI and Docker ran Node 20. That
+      # wall is gone — Node 20 reached EOL on 2026-04-30 and the toolchain moved
+      # to Node 22 — so both were taken and the ignores removed rather than left
+      # with a rationale that no longer holds.
       - dependency-name: "@vitejs/plugin-react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@testing-library/jest-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
 
   # GitHub Actions workflow pins.

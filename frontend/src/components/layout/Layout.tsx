@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
+import { Link, Outlet, useLocation, useSearchParams } from "react-router";
 import { Activity, BarChart3, Bot, Check, ChevronDown, FileText, Languages, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";

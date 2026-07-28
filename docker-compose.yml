@@ -59,7 +59,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: node:20@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5  # node:20 digest resolved 2026-07-13
+    image: node:22@sha256:5647be709086c696ff32edaaf1c70cd26d1da6ab2b39c32f3c7b4c4a31957e37  # node:22 digest resolved 2026-07-28
     working_dir: /app
     ports:
       - "127.0.0.1:5899:5899"

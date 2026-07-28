@@ -1,7 +1,7 @@
 import './i18n';
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { RouterProvider } from "react-router-dom";
+import { RouterProvider } from "react-router";
 import { Toaster } from "sonner";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { router } from "./router";

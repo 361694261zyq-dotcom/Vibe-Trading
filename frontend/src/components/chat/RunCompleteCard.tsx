@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { memo, useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { BarChart3, Code2, FileText, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { AgentAvatar } from "./AgentAvatar";

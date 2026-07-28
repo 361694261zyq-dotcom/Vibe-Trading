@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { ArrowRight, Bot, BarChart3, Zap, UserCircle2, MessageSquarePlus, SearchCode, LineChart, ShieldCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 

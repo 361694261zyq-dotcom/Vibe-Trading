@@ -1,8 +1,8 @@
 # ============================================================================
 # Stage 1: Build frontend
 # ============================================================================
-FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS frontend-build
-# node:20-slim digest resolved 2026-07-13
+FROM node:22-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS frontend-build
+# node:22-slim digest resolved 2026-07-28
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
