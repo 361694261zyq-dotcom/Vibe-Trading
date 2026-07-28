@@ -335,6 +335,36 @@ def _get_goal_store():
     return _goal_store
 
 
+_mcp_session_id: str | None = None
+
+
+def _resolve_session_id(session_id: str = "") -> str:
+    """Resolve the goal session, defaulting to this server process's session.
+
+    The in-process tool registry injects the host session and keeps
+    ``session_id`` out of its required schema. MCP has no such injection point,
+    so these tools used to mark the id required — asking the model to invent an
+    internal identifier it has no way to know, the opposite contract from the
+    local path (#885). Default instead to one stable id per server process,
+    which is the closest MCP equivalent of a host-owned session, while still
+    honouring an explicit id from a client that tracks its own conversations.
+
+    Args:
+        session_id: Optional client-supplied session id.
+
+    Returns:
+        A non-empty session id.
+    """
+    global _mcp_session_id
+    if cleaned := session_id.strip():
+        return cleaned
+    if _mcp_session_id is None:
+        import uuid
+
+        _mcp_session_id = f"mcp-{uuid.uuid4().hex[:12]}"
+    return _mcp_session_id
+
+
 def _json_ok(**payload: Any) -> str:
     """Return a standard MCP JSON success envelope."""
     return json.dumps({"status": "ok", **payload}, ensure_ascii=False, indent=2)
@@ -442,8 +472,8 @@ def load_skill(name: str) -> str:
 
 @mcp.tool
 def start_research_goal(
-    session_id: str,
     objective: str,
+    session_id: str = "",
     criteria: list[str] | None = None,
     ui_summary: str = "",
     protocol: str = "thesis_review",
@@ -459,8 +489,9 @@ def start_research_goal(
     previous current goal for the same session.
 
     Args:
-        session_id: External conversation/session id owned by the MCP client.
         objective: Research-only objective, not a trade execution request.
+        session_id: Optional conversation id. Omit it unless the client tracks
+            its own sessions; this server then uses one id per process.
         criteria: Optional checklist. Defaults to the MVP finance protocol.
         ui_summary: Optional compact label for UI surfaces.
         protocol: Research protocol name. Defaults to thesis_review.
@@ -472,7 +503,7 @@ def start_research_goal(
     try:
         clean_criteria = _clean_list(criteria) or _default_goal_criteria()
         goal = _get_goal_store().replace_goal(
-            session_id=session_id.strip(),
+            session_id=_resolve_session_id(session_id),
             objective=objective,
             criteria=clean_criteria,
             ui_summary=ui_summary,
@@ -490,14 +521,15 @@ def start_research_goal(
 
 
 @mcp.tool
-def get_research_goal(session_id: str) -> str:
+def get_research_goal(session_id: str = "") -> str:
     """Return the current finance research goal snapshot for a session.
 
     Args:
-        session_id: External conversation/session id owned by the MCP client.
+        session_id: Optional conversation id. Omit it unless the client tracks
+            its own sessions; this server then uses one id per process.
     """
     try:
-        snapshot = _get_goal_store().get_current_snapshot(session_id.strip())
+        snapshot = _get_goal_store().get_current_snapshot(_resolve_session_id(session_id))
     except ValueError as exc:
         return _json_error(str(exc), error_type="validation")
     if snapshot is None:
@@ -507,10 +539,10 @@ def get_research_goal(session_id: str) -> str:
 
 @mcp.tool
 def add_goal_evidence(
-    session_id: str,
     goal_id: str,
     expected_goal_id: str,
     text: str,
+    session_id: str = "",
     criterion_id: str | None = None,
     claim_id: str | None = None,
     evidence_type: str = "evidence",
@@ -534,10 +566,11 @@ def add_goal_evidence(
     """Append traceable evidence to a finance research goal.
 
     Args:
-        session_id: External conversation/session id.
         goal_id: Goal being mutated.
         expected_goal_id: Goal id captured before the tool/model turn started.
         text: Evidence note or result summary.
+        session_id: Optional conversation id. Omit it unless the client tracks
+            its own sessions; this server then uses one id per process.
         criterion_id: Optional criterion this evidence satisfies.
         claim_id: Optional claim this evidence supports or contradicts.
         evidence_type: Evidence category, default evidence.
@@ -562,7 +595,7 @@ def add_goal_evidence(
         from src.goal import EvidenceInput, StaleGoalError
 
         evidence = _get_goal_store().append_evidence(
-            session_id=session_id.strip(),
+            session_id=_resolve_session_id(session_id),
             goal_id=goal_id.strip(),
             expected_goal_id=expected_goal_id.strip(),
             evidence=EvidenceInput(
@@ -602,10 +635,10 @@ def add_goal_evidence(
 
 @mcp.tool
 def update_research_goal_status(
-    session_id: str,
     goal_id: str,
     expected_goal_id: str,
     status: str,
+    session_id: str = "",
     audit: list[dict[str, Any]] | None = None,
     recap: str | None = None,
 ) -> str:
@@ -616,10 +649,11 @@ def update_research_goal_status(
     required criterion and verified evidence for satisfied rows.
 
     Args:
-        session_id: External conversation/session id.
         goal_id: Goal being mutated.
         expected_goal_id: Goal id captured before the tool/model turn started.
         status: Goal lifecycle status, e.g. complete, cancelled, blocked.
+        session_id: Optional conversation id. Omit it unless the client tracks
+            its own sessions; this server then uses one id per process.
         audit: Optional list of criterion audit rows.
         recap: Optional concise status recap.
     """
@@ -627,7 +661,7 @@ def update_research_goal_status(
         from src.goal import GoalStatus, StaleGoalError
 
         updated = _get_goal_store().update_status(
-            session_id=session_id.strip(),
+            session_id=_resolve_session_id(session_id),
             goal_id=goal_id.strip(),
             expected_goal_id=expected_goal_id.strip(),
             status=GoalStatus(status),

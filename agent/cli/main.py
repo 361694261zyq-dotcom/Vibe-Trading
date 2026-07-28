@@ -24,6 +24,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -703,7 +704,10 @@ def _run_one_turn(user_input: str, ctx: InteractiveContext) -> None:
     console = get_console()
 
     if ctx.session_id is None:
-        ctx.session_id = _new_session(user_input)
+        # Fall back to an unpersisted id: a session-store failure must not strip
+        # the turn of its session, which would fail every research-goal call
+        # with ``session_id is required`` (#885).
+        ctx.session_id = _new_session(user_input) or uuid.uuid4().hex[:12]
     _append_message(ctx.session_id or "", "user", user_input)
 
     start = time.perf_counter()
