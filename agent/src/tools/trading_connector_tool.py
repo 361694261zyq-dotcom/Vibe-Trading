@@ -25,7 +25,16 @@ from src.trading.service import (
     get_open_orders,
     get_positions,
     get_quote,
+    get_tiger_depth_quote,
+    get_tiger_market_status,
+    get_tiger_option_chain,
+    get_tiger_option_expirations,
+    get_tiger_order_history,
+    get_tiger_trade_ticks,
+    get_tiger_trading_calendar,
+    get_tiger_transactions,
     place_order,
+    query_tiger_account_domain,
 )
 
 
@@ -126,6 +135,10 @@ def _num_or_none(value: Any, field: str = "value") -> float | None:
     if value is None or value == "":
         return None
     return _finite_float(value, field)
+
+
+def _tiger_read_error() -> str:
+    return "Tiger connector request failed"
 
 
 TRADING_COMMON_PARAMETERS = {
@@ -395,6 +408,205 @@ class TradingHistoryTool(BaseTool):
             )
         except Exception as exc:  # noqa: BLE001
             return _json_result({"status": "error", "error": str(exc)})
+
+
+class TradingTigerAccountReadTool(BaseTool):
+    """Read the allowlisted TigerOpen account domain without trading mutations."""
+
+    name = "trading_tiger_account_read"
+    description = (
+        "Read Tiger account data through an explicit read-only allowlist. Groups/actions: "
+        "account(managed_accounts, assets, prime_assets, aggregate_assets, analytics, "
+        "fund_details, funding_history, segment_fund_available, segment_fund_history); "
+        "portfolio(positions, option_exercise_records, option_exercise_positions, "
+        "transfer_records, transfer_external_records, transfer_detail); "
+        "activity(order, open_orders, filled_orders, cancelled_orders). "
+        "Credentials and account IDs always come from the selected Tiger profile."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "connection": TRADING_COMMON_PARAMETERS["connection"],
+            "group": {"type": "string", "enum": ["account", "portfolio", "activity"]},
+            "action": {"type": "string", "description": "One action listed in this tool's description."},
+            "params": {
+                "type": "object",
+                "description": "Action-specific filters. account, account_id, and secret_key are rejected.",
+                "additionalProperties": True,
+            },
+        },
+        "required": ["group", "action"],
+    }
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **kwargs: Any) -> str:
+        """Dispatch one allowlisted Tiger account read."""
+        try:
+            params = kwargs.get("params") or {}
+            if not isinstance(params, dict):
+                raise ValueError("params must be an object")
+            if len(params) > 30:
+                raise ValueError("params has too many fields")
+            result = query_tiger_account_domain(
+                str(kwargs.get("group") or ""),
+                str(kwargs.get("action") or ""),
+                _connection(kwargs.get("connection")),
+                **params,
+            )
+            return _json_result(result)
+        except Exception:  # noqa: BLE001
+            return _json_result({"status": "error", "error": _tiger_read_error()})
+
+
+class TradingTigerMarketTool(BaseTool):
+    """Read Tiger option, session, calendar, depth, and tick data."""
+
+    name = "trading_tiger_market"
+    description = (
+        "Read TigerOpen market data. operation is option_expirations, option_chain, "
+        "market_status, calendar, depth, or ticks. Read-only and Tiger profiles only."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "connection": TRADING_COMMON_PARAMETERS["connection"],
+            "operation": {
+                "type": "string",
+                "enum": ["option_expirations", "option_chain", "market_status", "calendar", "depth", "ticks"],
+            },
+            "symbol": {"type": "string", "description": "Underlying or stock symbol when required."},
+            "expiry": {"type": "string", "description": "Option expiry date, required for option_chain."},
+            "market": {"type": "string", "enum": ["ALL", "US", "HK", "CN", "SG", "AU"]},
+            "return_greeks": {"type": "boolean", "default": True},
+            "timezone": {"type": "string"},
+            "begin_date": {"type": "string", "description": "Calendar begin date, YYYY-MM-DD."},
+            "end_date": {"type": "string", "description": "Calendar end date, YYYY-MM-DD."},
+            "trade_session": {"type": "string"},
+            "begin_index": {"type": "integer"},
+            "end_index": {"type": "integer"},
+            "limit": {"type": "integer", "default": 100},
+        },
+        "required": ["operation"],
+    }
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **kwargs: Any) -> str:
+        """Dispatch one Tiger market-data operation."""
+        try:
+            operation = str(kwargs.get("operation") or "").strip().lower()
+            connection = _connection(kwargs.get("connection"))
+            symbol = str(kwargs.get("symbol") or "")
+            market = str(kwargs.get("market") or ("ALL" if operation == "market_status" else "US"))
+            if operation == "option_expirations":
+                result = get_tiger_option_expirations(symbol, connection, market=market)
+            elif operation == "option_chain":
+                result = get_tiger_option_chain(
+                    symbol,
+                    str(kwargs.get("expiry") or ""),
+                    connection,
+                    market=market,
+                    return_greeks=bool(kwargs.get("return_greeks", True)),
+                    timezone=_connection(kwargs.get("timezone")),
+                )
+            elif operation == "market_status":
+                result = get_tiger_market_status(connection, market=market)
+            elif operation == "calendar":
+                result = get_tiger_trading_calendar(
+                    connection,
+                    market=market,
+                    begin_date=_connection(kwargs.get("begin_date")),
+                    end_date=_connection(kwargs.get("end_date")),
+                )
+            elif operation == "depth":
+                result = get_tiger_depth_quote(
+                    symbol,
+                    connection,
+                    market=market,
+                    trade_session=_connection(kwargs.get("trade_session")),
+                )
+            elif operation == "ticks":
+                result = get_tiger_trade_ticks(
+                    symbol,
+                    connection,
+                    trade_session=_connection(kwargs.get("trade_session")),
+                    begin_index=_int_or_none(kwargs.get("begin_index")),
+                    end_index=_int_or_none(kwargs.get("end_index")),
+                    limit=int(kwargs.get("limit") or 100),
+                )
+            else:
+                raise ValueError("unsupported Tiger market operation")
+            return _json_result(result)
+        except Exception:  # noqa: BLE001
+            return _json_result({"status": "error", "error": _tiger_read_error()})
+
+
+class TradingTigerActivityTool(BaseTool):
+    """Read Tiger historical orders and execution transactions."""
+
+    name = "trading_tiger_activity"
+    description = (
+        "Read TigerOpen historical orders or execution transactions with time, symbol, "
+        "market, security-type, and pagination filters. Read-only and Tiger profiles only."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "connection": TRADING_COMMON_PARAMETERS["connection"],
+            "operation": {"type": "string", "enum": ["orders", "transactions"]},
+            "market": {"type": "string", "enum": ["ALL", "US", "HK", "CN", "SG", "AU"], "default": "ALL"},
+            "symbol": {"type": "string"},
+            "order_id": {"type": "integer"},
+            "start_time": {"description": "Order date/time or transaction epoch milliseconds."},
+            "end_time": {"description": "Order date/time or transaction epoch milliseconds."},
+            "limit": {"type": "integer", "default": 100},
+            "states": {"type": "array", "items": {"type": "string"}},
+            "sec_type": {"type": "string"},
+            "page_token": {"type": "string"},
+            "since_date": {"type": "string", "description": "Transaction begin date, YYYY-MM-DD."},
+            "to_date": {"type": "string", "description": "Transaction end date, YYYY-MM-DD."},
+        },
+        "required": ["operation"],
+    }
+    repeatable = True
+    is_readonly = True
+
+    def execute(self, **kwargs: Any) -> str:
+        """Dispatch an order-history or transaction query."""
+        try:
+            operation = str(kwargs.get("operation") or "").strip().lower()
+            connection = _connection(kwargs.get("connection"))
+            common = {
+                "market": str(kwargs.get("market") or "ALL"),
+                "symbol": _connection(kwargs.get("symbol")),
+                "limit": int(kwargs.get("limit") or 100),
+                "sec_type": _connection(kwargs.get("sec_type")),
+                "page_token": _connection(kwargs.get("page_token")),
+            }
+            if operation == "orders":
+                result = get_tiger_order_history(
+                    connection,
+                    start_time=kwargs.get("start_time"),
+                    end_time=kwargs.get("end_time"),
+                    states=list(kwargs.get("states") or []) or None,
+                    **common,
+                )
+            elif operation == "transactions":
+                result = get_tiger_transactions(
+                    connection,
+                    order_id=_int_or_none(kwargs.get("order_id")),
+                    start_time=_int_or_none(kwargs.get("start_time")),
+                    end_time=_int_or_none(kwargs.get("end_time")),
+                    since_date=_connection(kwargs.get("since_date")),
+                    to_date=_connection(kwargs.get("to_date")),
+                    **common,
+                )
+            else:
+                raise ValueError("operation must be 'orders' or 'transactions'")
+            return _json_result(result)
+        except Exception:  # noqa: BLE001
+            return _json_result({"status": "error", "error": _tiger_read_error()})
 
 
 class TradingPlaceOrderTool(BaseTool):

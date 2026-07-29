@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 from typing import Any, Dict
 
 # Opening ---, optional meta lines, closing ---. The closing fence may be at
@@ -29,14 +30,28 @@ def parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
         return {}, text.strip()
 
     meta: Dict[str, Any] = {}
-    for line in (match.group(1) or "").strip().split("\n"):
-        line = line.strip()
+    lines = (match.group(1) or "").strip().split("\n")
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
+        line = raw_line.strip()
+        index += 1
         if ":" not in line:
             continue
         key, value = line.split(":", 1)
         key = key.strip()
         value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
+        if value in {"|", ">"}:
+            block_lines: list[str] = []
+            while index < len(lines):
+                candidate = lines[index]
+                if candidate and not candidate[0].isspace():
+                    break
+                block_lines.append(candidate)
+                index += 1
+            block = textwrap.dedent("\n".join(block_lines)).strip()
+            meta[key] = block if value == "|" else " ".join(block.splitlines())
+        elif value.startswith("[") and value.endswith("]"):
             items = [item.strip().strip("'\"") for item in value[1:-1].split(",")]
             meta[key] = [i for i in items if i]
         elif value.lower() in ("true", "false"):

@@ -17,6 +17,10 @@ results/
 .env
 agent/.env
 
+# Local broker credentials
+/tiger/
+**/tiger_openapi_config.properties
+
 .claude/*
 !.claude/hooks.json
 CLAUDE.md

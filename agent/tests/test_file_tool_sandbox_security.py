@@ -57,6 +57,37 @@ def test_write_file_rejects_unconfigured_absolute_run_dir(tmp_path: Path, monkey
     assert not (tmp_path / "code" / "signal_engine.py").exists()
 
 
+def test_read_file_resolves_external_skill_references_without_escape(tmp_path: Path) -> None:
+    """Allow skill references while rejecting traversal outside their root."""
+    skill_dir = tmp_path / "agent-skills" / "tigeropen"
+    references_dir = skill_dir / "references"
+    references_dir.mkdir(parents=True)
+    (references_dir / "trade.md").write_text("official Tiger trade guide", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not readable", encoding="utf-8")
+    tool = ReadFileTool(skill_roots=[skill_dir.parent])
+
+    allowed = _body(tool.execute(path="tigeropen/references/trade.md"))
+    escaped = _body(tool.execute(path="../secret.txt"))
+
+    assert allowed["status"] == "ok"
+    assert allowed["content"] == "official Tiger trade guide"
+    assert escaped["status"] == "error"
+
+
+def test_read_file_rejects_symlinked_skill_collection_root(tmp_path: Path) -> None:
+    """Reject skill collection roots that are symbolic links."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("not readable", encoding="utf-8")
+    symlinked_root = tmp_path / "agent-skills"
+    symlinked_root.symlink_to(outside, target_is_directory=True)
+
+    body = _body(ReadFileTool(skill_roots=[symlinked_root]).execute(path="secret.txt"))
+
+    assert body["status"] == "error"
+
+
 def test_read_and_edit_file_accept_configured_run_root(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VIBE_TRADING_ALLOWED_RUN_ROOTS", str(tmp_path))
     target = tmp_path / "run" / "notes.md"

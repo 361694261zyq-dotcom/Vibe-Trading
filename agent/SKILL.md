@@ -128,14 +128,16 @@ Comprehensive knowledge base covering:
 - Behavioral finance, trade journal diagnostics, shadow account
 - Macro analysis, credit research, sector rotation, and more
 
-Use `load_skill(name)` to access full methodology docs with code templates.
+Use `load_skill(name)` to access full methodology docs with code templates. Vibe-Trading also discovers compatible user-installed skills from `~/.agents/skills` without copying them into the project. Local Vibe skills in `~/.vibe-trading/skills/user` take precedence, followed by shared Agent skills, then the 88 bundled skills.
 
-## Available MCP Tools (55)
+For TigerOpen API guidance, install and maintain the official `tigeropen` skill under `~/.agents/skills/tigeropen`; Vibe-Trading reuses that source while its connector and MCP tools remain the credential-isolated execution layer.
+
+## Available MCP Tools (58)
 
 | Tool | Description | API Key |
 |------|-------------|---------|
-| `list_skills` | List all 88 finance skills | None |
-| `load_skill` | Load full skill documentation | None |
+| `list_skills` | List 88 bundled skills plus compatible installed Agent skills | None |
+| `load_skill` | Load bundled or installed skill documentation | None |
 | `start_research_goal` | Create an auditable research goal | None |
 | `get_research_goal` | Read the current research goal | None |
 | `add_goal_evidence` | Attach evidence to a research goal | None |
@@ -189,6 +191,9 @@ Use `load_skill(name)` to access full methodology docs with code templates.
 | `trading_orders` | Read open orders from selected connector | Connector app/OAuth |
 | `trading_quote` | Read a quote snapshot from selected connector | Connector app/OAuth |
 | `trading_history` | Read historical bars from selected connector | Connector app/OAuth |
+| `trading_tiger_market` | Read Tiger options, status, calendar, depth, and ticks | TigerOpen credentials |
+| `trading_tiger_activity` | Read Tiger order history and execution details | TigerOpen credentials |
+| `trading_tiger_account_read` | Read allowlisted Tiger account, portfolio, and activity data | TigerOpen credentials |
 
 <sub>*A-share symbols require `TUSHARE_TOKEN`. HK/US/crypto are free. Trading connector rows use the selected connector profile, e.g. IBKR local TWS/Gateway or Robinhood MCP OAuth.</sub>
 

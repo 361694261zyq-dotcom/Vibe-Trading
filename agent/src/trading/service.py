@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from src.trading.profiles import list_profiles, profile_by_id
 from src.trading.types import TradingProfile
@@ -37,6 +37,20 @@ def _sdk_module(connector: str):
     return importlib.import_module(path)
 
 
+def _call_sdk_read(
+    profile: TradingProfile,
+    operation: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Run a direct-SDK read and normalize Tiger failures at one boundary."""
+    try:
+        payload = operation()
+    except Exception:  # noqa: BLE001 - broker SDKs use inconsistent exception types
+        if profile.connector != "tiger":
+            raise
+        payload = {"status": "error", "error": "Tiger connector request failed"}
+    return _with_profile(profile, payload)
+
+
 def check_connection(profile_id: str | None = None, **overrides: Any) -> dict[str, Any]:
     """Check a connector profile without mutating broker state."""
     profile = profile_by_id(profile_id)
@@ -53,12 +67,10 @@ def check_connection(profile_id: str | None = None, **overrides: Any) -> dict[st
 
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        report = module.check_status(module.build_config(profile.config, overrides))
-        report["profile_id"] = profile.id
-        report["connector"] = profile.connector
-        report["environment"] = profile.environment
-        report["transport"] = profile.transport
-        return report
+        return _call_sdk_read(
+            profile,
+            lambda: module.check_status(module.build_config(profile.config, overrides)),
+        )
 
     return _remote_status(profile)
 
@@ -72,7 +84,12 @@ def get_account(profile_id: str | None = None, **overrides: Any) -> dict[str, An
         return _with_profile(profile, get_account_snapshot(_ibkr_config(profile, overrides)))
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        return _with_profile(profile, module.get_account_snapshot(module.build_config(profile.config, overrides)))
+        return _call_sdk_read(
+            profile,
+            lambda: module.get_account_snapshot(
+                module.build_config(profile.config, overrides)
+            ),
+        )
     return _call_remote(profile, "account", _account_arg(overrides))
 
 
@@ -85,7 +102,10 @@ def get_positions(profile_id: str | None = None, **overrides: Any) -> dict[str, 
         return _with_profile(profile, _get_positions(_ibkr_config(profile, overrides)))
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        return _with_profile(profile, module.get_positions(module.build_config(profile.config, overrides)))
+        return _call_sdk_read(
+            profile,
+            lambda: module.get_positions(module.build_config(profile.config, overrides)),
+        )
     return _call_remote(profile, "positions", _account_arg(overrides))
 
 
@@ -106,10 +126,11 @@ def get_open_orders(
         )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        return _with_profile(
+        return _call_sdk_read(
             profile,
-            module.get_open_orders(
-                module.build_config(profile.config, overrides), include_executions=include_executions
+            lambda: module.get_open_orders(
+                module.build_config(profile.config, overrides),
+                include_executions=include_executions,
             ),
         )
     return _call_remote(profile, "orders", _account_arg(overrides))
@@ -141,7 +162,13 @@ def get_quote(
         )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        return _with_profile(profile, module.get_quote(symbol, config=module.build_config(profile.config, overrides)))
+        return _call_sdk_read(
+            profile,
+            lambda: module.get_quote(
+                symbol,
+                config=module.build_config(profile.config, overrides),
+            ),
+        )
     return _call_remote(profile, "quote", {"symbols": [symbol], "symbol": symbol})
 
 
@@ -187,9 +214,9 @@ def get_history(
         )
     if profile.transport == "broker_sdk":
         module = _sdk_module(profile.connector)
-        return _with_profile(
+        return _call_sdk_read(
             profile,
-            module.get_historical_bars(
+            lambda: module.get_historical_bars(
                 symbol,
                 config=module.build_config(profile.config, overrides),
                 period=period,
@@ -197,6 +224,237 @@ def get_history(
             ),
         )
     return _unsupported(profile, "history.read")
+
+
+def _call_tiger_read(
+    profile_id: str | None,
+    capability: str,
+    method_name: str,
+    *,
+    args: tuple[Any, ...] = (),
+    params: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Dispatch a Tiger-specific read while keeping other profiles honest."""
+    profile = profile_by_id(profile_id)
+    if profile.transport != "broker_sdk" or profile.connector != "tiger":
+        return _unsupported(profile, capability)
+    module = _sdk_module("tiger")
+    return _call_sdk_read(
+        profile,
+        lambda: getattr(module, method_name)(
+            *args,
+            config=module.build_config(profile.config, overrides or {}),
+            **(params or {}),
+        ),
+    )
+
+
+def get_tiger_option_expirations(
+    symbol: str,
+    profile_id: str | None = None,
+    *,
+    market: str = "US",
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read option expiration dates from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "options.expirations.read",
+        "get_option_expirations",
+        args=(symbol,),
+        params={"market": market},
+        overrides=overrides,
+    )
+
+
+def get_tiger_option_chain(
+    symbol: str,
+    expiry: str,
+    profile_id: str | None = None,
+    *,
+    market: str = "US",
+    return_greeks: bool = True,
+    timezone: str | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read an option chain from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "options.chain.read",
+        "get_option_chain",
+        args=(symbol, expiry),
+        params={"market": market, "return_greeks": return_greeks, "timezone": timezone},
+        overrides=overrides,
+    )
+
+
+def get_tiger_market_status(
+    profile_id: str | None = None,
+    *,
+    market: str = "ALL",
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read market status from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "market.status.read",
+        "get_market_status",
+        params={"market": market},
+        overrides=overrides,
+    )
+
+
+def get_tiger_trading_calendar(
+    profile_id: str | None = None,
+    *,
+    market: str,
+    begin_date: str | int | None = None,
+    end_date: str | int | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read the trading calendar from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "market.calendar.read",
+        "get_trading_calendar",
+        params={"market": market, "begin_date": begin_date, "end_date": end_date},
+        overrides=overrides,
+    )
+
+
+def get_tiger_depth_quote(
+    symbol: str,
+    profile_id: str | None = None,
+    *,
+    market: str,
+    trade_session: str | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read a depth quote from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "market.depth.read",
+        "get_depth_quote",
+        args=(symbol,),
+        params={"market": market, "trade_session": trade_session},
+        overrides=overrides,
+    )
+
+
+def get_tiger_trade_ticks(
+    symbol: str,
+    profile_id: str | None = None,
+    *,
+    trade_session: str | None = None,
+    begin_index: int | None = None,
+    end_index: int | None = None,
+    limit: int = 100,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read trade ticks from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "market.ticks.read",
+        "get_trade_ticks",
+        args=(symbol,),
+        params={
+            "trade_session": trade_session,
+            "begin_index": begin_index,
+            "end_index": end_index,
+            "limit": limit,
+        },
+        overrides=overrides,
+    )
+
+
+def get_tiger_order_history(
+    profile_id: str | None = None,
+    *,
+    market: str = "ALL",
+    symbol: str | None = None,
+    start_time: str | int | None = None,
+    end_time: str | int | None = None,
+    limit: int = 100,
+    states: list[str] | None = None,
+    sec_type: str | None = None,
+    page_token: str | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read order history from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "orders.history.read",
+        "get_order_history",
+        params={
+            "market": market,
+            "symbol": symbol,
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+            "states": states,
+            "sec_type": sec_type,
+            "page_token": page_token,
+        },
+        overrides=overrides,
+    )
+
+
+def get_tiger_transactions(
+    profile_id: str | None = None,
+    *,
+    market: str = "ALL",
+    symbol: str | None = None,
+    order_id: int | None = None,
+    start_time: int | None = None,
+    end_time: int | None = None,
+    limit: int = 100,
+    sec_type: str | None = None,
+    page_token: str | None = None,
+    since_date: str | None = None,
+    to_date: str | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """Read transactions from a Tiger connector profile."""
+    return _call_tiger_read(
+        profile_id,
+        "transactions.read",
+        "get_transactions",
+        params={
+            "market": market,
+            "symbol": symbol,
+            "order_id": order_id,
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+            "sec_type": sec_type,
+            "page_token": page_token,
+            "since_date": since_date,
+            "to_date": to_date,
+        },
+        overrides=overrides,
+    )
+
+
+def query_tiger_account_domain(
+    group: str,
+    action: str,
+    profile_id: str | None = None,
+    **params: Any,
+) -> dict[str, Any]:
+    """Dispatch an allowlisted Tiger account-domain read operation."""
+    capability = {
+        "account": "account.assets.detail.read",
+        "portfolio": "positions.detail.read",
+        "activity": "orders.detail.read",
+    }.get(str(group).strip().lower(), "account.read")
+    return _call_tiger_read(
+        profile_id,
+        capability,
+        "query_account_domain",
+        args=(group, action),
+        params=params,
+    )
 
 
 #: Connector → (instrument type, fixed asset class | None). ``None`` asset class
