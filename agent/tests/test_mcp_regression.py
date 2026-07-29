@@ -298,3 +298,49 @@ def test_trading_mcp_wrappers_forward_explicit_local_overrides(monkeypatch: pyte
         ),
         ("trading_check", {"account": "DU12345"}),
     ]
+
+
+def test_tiger_option_mcp_wrapper_forwards_complete_read_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward the complete read-only option surface through MCP."""
+    mod = _import_mcp_server()
+    registry = _RecordingRegistry()
+    monkeypatch.setattr(mod, "_get_registry", lambda: registry)
+
+    mod.trading_tiger_market(
+        operation="option_analysis",
+        connection="tiger-paper-sdk",
+        symbols=["AAPL", {"symbol": "TSLA", "period": "26week"}],
+        identifiers=["AAPL  260918C00200000"],
+        expiry="2026-09-18",
+        market="US",
+        option_filter={"delta_min": 0.2, "open_interest_min": 100},
+        begin_time="2026-07-01",
+        end_time=1785542399000,
+        period="26week",
+        sort_dir="ASC",
+        lang="en_US",
+        require_volatility_list=True,
+        currency="USD",
+        exchange="SMART",
+        strike=200.0,
+        put_call="CALL",
+        sec_type="OPT",
+        limit=30,
+    )
+
+    name, payload = registry.calls[0]
+    assert name == "trading_tiger_market"
+    assert payload["operation"] == "option_analysis"
+    assert payload["connection"] == "tiger-paper-sdk"
+    assert payload["symbols"] == ["AAPL", {"symbol": "TSLA", "period": "26week"}]
+    assert payload["identifiers"] == ["AAPL  260918C00200000"]
+    assert payload["option_filter"] == {
+        "delta_min": 0.2,
+        "open_interest_min": 100,
+    }
+    assert payload["begin_time"] == "2026-07-01"
+    assert payload["end_time"] == 1785542399000
+    assert payload["require_volatility_list"] is True
+    assert payload["sec_type"] == "OPT"

@@ -26,14 +26,13 @@ from src.trading.service import (
     get_quote,
     get_tiger_depth_quote,
     get_tiger_market_status,
-    get_tiger_option_chain,
-    get_tiger_option_expirations,
     get_tiger_order_history,
     get_tiger_trade_ticks,
     get_tiger_trading_calendar,
     get_tiger_transactions,
     place_order,
     query_tiger_account_domain,
+    query_tiger_option_market,
 )
 
 
@@ -328,7 +327,7 @@ class TradingTigerAccountReadTool(BaseTool):
         "Read Tiger account data through an explicit read-only allowlist. Groups/actions: "
         "account(managed_accounts, assets, prime_assets, aggregate_assets, analytics, "
         "fund_details, funding_history, segment_fund_available, segment_fund_history); "
-        "portfolio(positions, option_exercise_records, option_exercise_positions, "
+        "portfolio(positions, option_exercise_records, option_exercise_positions, option_exercise_check, "
         "transfer_records, transfer_external_records, transfer_detail); "
         "activity(order, open_orders, filled_orders, cancelled_orders). "
         "Credentials and account IDs always come from the selected Tiger profile."
@@ -369,13 +368,59 @@ class TradingTigerAccountReadTool(BaseTool):
             return _json_result({"status": "error", "error": _tiger_read_error()})
 
 
+_TIGER_OPTION_PARAM_KEYS = {
+    "option_symbols": ("market", "lang"),
+    "option_expirations": ("symbols", "market"),
+    "option_chain": (
+        "symbol",
+        "expiry",
+        "market",
+        "return_greeks",
+        "timezone",
+        "option_filter",
+    ),
+    "option_briefs": ("identifiers", "market", "timezone"),
+    "option_bars": (
+        "identifiers",
+        "begin_time",
+        "end_time",
+        "period",
+        "limit",
+        "sort_dir",
+        "market",
+        "timezone",
+    ),
+    "option_depth": ("identifiers", "market", "timezone"),
+    "option_ticks": ("identifiers", "timezone"),
+    "option_timeline": ("identifiers", "market", "begin_time", "timezone"),
+    "option_analysis": (
+        "symbols",
+        "period",
+        "market",
+        "require_volatility_list",
+        "lang",
+    ),
+    "option_contract": (
+        "symbol",
+        "currency",
+        "exchange",
+        "expiry",
+        "strike",
+        "put_call",
+        "lang",
+    ),
+    "option_derivative_contracts": ("symbol", "expiry", "sec_type", "lang"),
+}
+
+
 class TradingTigerMarketTool(BaseTool):
     """Read Tiger option, session, calendar, depth, and tick data."""
 
     name = "trading_tiger_market"
     description = (
-        "Read TigerOpen market data. operation is option_expirations, option_chain, "
-        "market_status, calendar, depth, or ticks. Read-only and Tiger profiles only."
+        "Read TigerOpen option and market data. Option operations cover symbols, expirations, "
+        "chains, quotes, bars, depth, ticks, timelines, analysis, and contracts. General market "
+        "operations cover market_status, calendar, depth, and ticks. Read-only and Tiger profiles only."
     )
     parameters = {
         "type": "object",
@@ -383,15 +428,91 @@ class TradingTigerMarketTool(BaseTool):
             "connection": TRADING_COMMON_PARAMETERS["connection"],
             "operation": {
                 "type": "string",
-                "enum": ["option_expirations", "option_chain", "market_status", "calendar", "depth", "ticks"],
+                "enum": [
+                    "option_symbols",
+                    "option_expirations",
+                    "option_chain",
+                    "option_briefs",
+                    "option_bars",
+                    "option_depth",
+                    "option_ticks",
+                    "option_timeline",
+                    "option_analysis",
+                    "option_contract",
+                    "option_derivative_contracts",
+                    "market_status",
+                    "calendar",
+                    "depth",
+                    "ticks",
+                ],
             },
             "symbol": {"type": "string", "description": "Underlying or stock symbol when required."},
-            "expiry": {"type": "string", "description": "Option expiry date, required for option_chain."},
+            "symbols": {
+                "type": "array",
+                "items": {
+                    "oneOf": [
+                        {"type": "string"},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "symbol": {"type": "string"},
+                                "period": {"type": "string"},
+                            },
+                            "required": ["symbol"],
+                            "additionalProperties": False,
+                        },
+                    ]
+                },
+                "maxItems": 30,
+            },
+            "identifiers": {"type": "array", "items": {"type": "string"}, "maxItems": 30},
+            "expiry": {"type": "string", "description": "Option expiry date when required."},
             "market": {"type": "string", "enum": ["ALL", "US", "HK", "CN", "SG", "AU"]},
             "return_greeks": {"type": "boolean", "default": True},
-            "timezone": {"type": "string"},
-            "begin_date": {"type": "string", "description": "Calendar begin date, YYYY-MM-DD."},
-            "end_date": {"type": "string", "description": "Calendar end date, YYYY-MM-DD."},
+            "option_filter": {
+                "type": "object",
+                "properties": {
+                    key: {"type": "boolean" if key == "in_the_money" else "number"}
+                    for key in (
+                        "implied_volatility_min",
+                        "implied_volatility_max",
+                        "open_interest_min",
+                        "open_interest_max",
+                        "delta_min",
+                        "delta_max",
+                        "gamma_min",
+                        "gamma_max",
+                        "theta_min",
+                        "theta_max",
+                        "vega_min",
+                        "vega_max",
+                        "rho_min",
+                        "rho_max",
+                        "in_the_money",
+                    )
+                },
+                "additionalProperties": False,
+            },
+            "timezone": {"type": "string", "maxLength": 64},
+            "begin_date": {"type": "string", "maxLength": 32, "description": "Calendar begin date, YYYY-MM-DD."},
+            "end_date": {"type": "string", "maxLength": 32, "description": "Calendar end date, YYYY-MM-DD."},
+            "begin_time": {
+                "oneOf": [{"type": "integer"}, {"type": "string", "maxLength": 64}],
+                "description": "Option bar or timeline start time.",
+            },
+            "end_time": {
+                "oneOf": [{"type": "integer"}, {"type": "string", "maxLength": 64}],
+                "description": "Option bar end time.",
+            },
+            "period": {"type": "string", "maxLength": 32},
+            "sort_dir": {"type": "string", "enum": ["ASC", "DESC"]},
+            "lang": {"type": "string", "maxLength": 32},
+            "require_volatility_list": {"type": "boolean"},
+            "currency": {"type": "string", "maxLength": 16},
+            "exchange": {"type": "string", "maxLength": 32},
+            "strike": {"type": "number"},
+            "put_call": {"type": "string", "enum": ["PUT", "CALL"]},
+            "sec_type": {"type": "string", "enum": ["OPT", "WAR", "IOPT"]},
             "trade_session": {"type": "string"},
             "begin_index": {"type": "integer"},
             "end_index": {"type": "integer"},
@@ -409,17 +530,21 @@ class TradingTigerMarketTool(BaseTool):
             connection = _connection(kwargs.get("connection"))
             symbol = str(kwargs.get("symbol") or "")
             market = str(kwargs.get("market") or ("ALL" if operation == "market_status" else "US"))
-            if operation == "option_expirations":
-                result = get_tiger_option_expirations(symbol, connection, market=market)
-            elif operation == "option_chain":
-                result = get_tiger_option_chain(
-                    symbol,
-                    str(kwargs.get("expiry") or ""),
-                    connection,
-                    market=market,
-                    return_greeks=bool(kwargs.get("return_greeks", True)),
-                    timezone=_connection(kwargs.get("timezone")),
-                )
+            if operation in _TIGER_OPTION_PARAM_KEYS:
+                if operation == "option_analysis" and len(kwargs.get("symbols") or []) > 10:
+                    raise ValueError("option_analysis supports at most 10 symbols")
+                params = {
+                    key: kwargs.get(key)
+                    for key in _TIGER_OPTION_PARAM_KEYS[operation]
+                    if kwargs.get(key) is not None
+                }
+                if "market" in _TIGER_OPTION_PARAM_KEYS[operation]:
+                    params.setdefault("market", "HK" if operation == "option_symbols" else "US")
+                if operation == "option_expirations" and "symbols" not in params:
+                    params["symbols"] = [symbol] if symbol else []
+                if operation == "option_chain":
+                    params.setdefault("return_greeks", True)
+                result = query_tiger_option_market(operation, connection, **params)
             elif operation == "market_status":
                 result = get_tiger_market_status(connection, market=market)
             elif operation == "calendar":
@@ -506,8 +631,8 @@ class TradingTigerActivityTool(BaseTool):
                 result = get_tiger_transactions(
                     connection,
                     order_id=_int_or_none(kwargs.get("order_id")),
-                    start_time=_int_or_none(kwargs.get("start_time")),
-                    end_time=_int_or_none(kwargs.get("end_time")),
+                    start_time=kwargs.get("start_time"),
+                    end_time=kwargs.get("end_time"),
                     since_date=_connection(kwargs.get("since_date")),
                     to_date=_connection(kwargs.get("to_date")),
                     **common,

@@ -189,9 +189,9 @@ For TigerOpen API guidance, install and maintain the official `tigeropen` skill 
 | `trading_orders` | Read open orders from selected connector | Connector app/OAuth |
 | `trading_quote` | Read a quote snapshot from selected connector | Connector app/OAuth |
 | `trading_history` | Read historical bars from selected connector | Connector app/OAuth |
-| `trading_tiger_market` | Read Tiger options, status, calendar, depth, and ticks | TigerOpen credentials |
+| `trading_tiger_market` | Read Tiger option symbols, expirations, chains, quotes, bars, depth, ticks, timelines, analysis, contracts, plus market status and calendar | TigerOpen credentials |
 | `trading_tiger_activity` | Read Tiger order history and execution details | TigerOpen credentials |
-| `trading_tiger_account_read` | Read allowlisted Tiger account, portfolio, and activity data | TigerOpen credentials |
+| `trading_tiger_account_read` | Read allowlisted Tiger account, portfolio, activity, option exercise eligibility, and exercise/transfer records | TigerOpen credentials |
 
 <sub>*A-share symbols require `TUSHARE_TOKEN`. HK/US/crypto are free. Trading connector rows use the selected connector profile, e.g. IBKR local TWS/Gateway or Robinhood MCP OAuth.</sub>
 
