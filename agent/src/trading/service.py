@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from src.trading.profiles import list_profiles, profile_by_id
 from src.trading.types import TradingProfile
@@ -250,8 +250,46 @@ def _call_tiger_read(
     )
 
 
+_TIGER_OPTION_READS = {
+    "option_symbols": ("options.symbols.read", "get_option_symbols"),
+    "option_expirations": ("options.expirations.read", "get_option_expirations"),
+    "option_chain": ("options.chain.read", "get_option_chain"),
+    "option_briefs": ("options.quotes.read", "get_option_briefs"),
+    "option_bars": ("options.history.read", "get_option_bars"),
+    "option_depth": ("options.depth.read", "get_option_depth"),
+    "option_ticks": ("options.ticks.read", "get_option_trade_ticks"),
+    "option_timeline": ("options.timeline.read", "get_option_timeline"),
+    "option_analysis": ("options.analysis.read", "get_option_analysis"),
+    "option_contract": ("options.contracts.read", "get_option_contract"),
+    "option_derivative_contracts": (
+        "options.contracts.read",
+        "get_option_derivative_contracts",
+    ),
+}
+
+
+def query_tiger_option_market(
+    operation: str,
+    profile_id: str | None = None,
+    **params: Any,
+) -> dict[str, Any]:
+    """Dispatch one read-only Tiger option market or contract operation."""
+    clean_operation = str(operation or "").strip().lower()
+    spec = _TIGER_OPTION_READS.get(clean_operation)
+    if spec is None:
+        profile = profile_by_id(profile_id)
+        return _unsupported(profile, "options.read")
+    capability, method_name = spec
+    return _call_tiger_read(
+        profile_id,
+        capability,
+        method_name,
+        params=params,
+    )
+
+
 def get_tiger_option_expirations(
-    symbol: str,
+    symbols: str | list[str],
     profile_id: str | None = None,
     *,
     market: str = "US",
@@ -262,7 +300,7 @@ def get_tiger_option_expirations(
         profile_id,
         "options.expirations.read",
         "get_option_expirations",
-        args=(symbol,),
+        args=(symbols,),
         params={"market": market},
         overrides=overrides,
     )
@@ -276,6 +314,7 @@ def get_tiger_option_chain(
     market: str = "US",
     return_greeks: bool = True,
     timezone: str | None = None,
+    option_filter: Mapping[str, Any] | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
     """Read an option chain from a Tiger connector profile."""
@@ -284,7 +323,12 @@ def get_tiger_option_chain(
         "options.chain.read",
         "get_option_chain",
         args=(symbol, expiry),
-        params={"market": market, "return_greeks": return_greeks, "timezone": timezone},
+        params={
+            "market": market,
+            "return_greeks": return_greeks,
+            "timezone": timezone,
+            "option_filter": option_filter,
+        },
         overrides=overrides,
     )
 
@@ -406,8 +450,8 @@ def get_tiger_transactions(
     market: str = "ALL",
     symbol: str | None = None,
     order_id: int | None = None,
-    start_time: int | None = None,
-    end_time: int | None = None,
+    start_time: str | int | None = None,
+    end_time: str | int | None = None,
     limit: int = 100,
     sec_type: str | None = None,
     page_token: str | None = None,

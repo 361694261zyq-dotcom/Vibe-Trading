@@ -248,16 +248,16 @@ def test_tiger_account_read_tool_dispatches_allowlisted_action(monkeypatch: pyte
 
 
 def test_tiger_market_tool_dispatches_option_chain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Dispatch Tiger option-chain requests with market parameters."""
+    """Dispatch complete Tiger option-chain filters through one read boundary."""
     calls: list[dict] = []
 
-    def fake_get_option_chain(symbol, expiry, connection, **kwargs):  # noqa: ANN001
-        calls.append({"symbol": symbol, "expiry": expiry, "connection": connection, **kwargs})
+    def fake_option_read(operation, connection, **params):  # noqa: ANN001
+        calls.append({"operation": operation, "connection": connection, **params})
         return {"status": "ok", "options": []}
 
     monkeypatch.setattr(
-        "src.tools.trading_connector_tool.get_tiger_option_chain",
-        fake_get_option_chain,
+        "src.tools.trading_connector_tool.query_tiger_option_market",
+        fake_option_read,
     )
     payload = json.loads(
         TradingTigerMarketTool().execute(
@@ -267,20 +267,82 @@ def test_tiger_market_tool_dispatches_option_chain(monkeypatch: pytest.MonkeyPat
             expiry="2026-09-18",
             market="US",
             return_greeks=True,
+            option_filter={"delta_min": 0.2, "open_interest_min": 100},
         )
     )
 
     assert payload["status"] == "ok"
     assert calls == [
         {
+            "operation": "option_chain",
+            "connection": "tiger-paper-sdk",
             "symbol": "AAPL",
             "expiry": "2026-09-18",
-            "connection": "tiger-paper-sdk",
             "market": "US",
             "return_greeks": True,
-            "timezone": None,
+            "option_filter": {"delta_min": 0.2, "open_interest_min": 100},
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "kwargs"),
+    [
+        ("option_symbols", {"market": "HK", "lang": "zh_CN"}),
+        ("option_expirations", {"symbols": ["AAPL", "TSLA"], "market": "US"}),
+        ("option_briefs", {"identifiers": ["AAPL  260918C00200000"], "market": "US"}),
+        (
+            "option_bars",
+            {
+                "identifiers": ["AAPL  260918C00200000"],
+                "period": "day",
+                "begin_time": "2026-07-01",
+                "end_time": "2026-07-31",
+                "limit": 30,
+            },
+        ),
+        ("option_depth", {"identifiers": ["AAPL  260918C00200000"], "market": "US"}),
+        ("option_ticks", {"identifiers": ["AAPL  260918C00200000"]}),
+        ("option_timeline", {"identifiers": ["AAPL  260918C00200000"], "market": "US"}),
+        ("option_analysis", {"symbols": ["AAPL"], "period": "52week", "market": "US"}),
+        (
+            "option_contract",
+            {
+                "symbol": "AAPL",
+                "expiry": "20260918",
+                "strike": 200.0,
+                "put_call": "CALL",
+            },
+        ),
+        (
+            "option_derivative_contracts",
+            {"symbol": "AAPL", "expiry": "20260918", "sec_type": "OPT"},
+        ),
+    ],
+)
+def test_tiger_market_tool_dispatches_all_option_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    kwargs: dict,
+) -> None:
+    """Expose every supported read-only Tiger option market operation."""
+    calls: list[dict] = []
+
+    def fake_option_read(selected_operation, connection, **params):  # noqa: ANN001
+        calls.append({"operation": selected_operation, "connection": connection, **params})
+        return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "src.tools.trading_connector_tool.query_tiger_option_market",
+        fake_option_read,
+    )
+
+    payload = json.loads(TradingTigerMarketTool().execute(operation=operation, **kwargs))
+
+    assert payload["status"] == "ok"
+    assert calls[0]["operation"] == operation
+    for key, value in kwargs.items():
+        assert calls[0][key] == value
 
 
 def test_tiger_activity_tool_dispatches_transaction_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,6 +374,34 @@ def test_tiger_activity_tool_dispatches_transaction_filters(monkeypatch: pytest.
     assert calls[0]["start_time"] == 1782864000000
     assert calls[0]["end_time"] == 1785542399000
     assert calls[0]["limit"] == 25
+
+
+def test_tiger_activity_tool_preserves_transaction_date_strings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve Tiger-supported date strings instead of coercing them to integers."""
+    calls: list[dict] = []
+
+    def fake_get_transactions(connection, **kwargs):  # noqa: ANN001
+        calls.append({"connection": connection, **kwargs})
+        return {"status": "ok", "transactions": []}
+
+    monkeypatch.setattr(
+        "src.tools.trading_connector_tool.get_tiger_transactions",
+        fake_get_transactions,
+    )
+
+    payload = json.loads(
+        TradingTigerActivityTool().execute(
+            operation="transactions",
+            start_time="2026-07-01",
+            end_time="2026-07-31 23:59:59",
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert calls[0]["start_time"] == "2026-07-01"
+    assert calls[0]["end_time"] == "2026-07-31 23:59:59"
 
 
 def test_generic_tiger_reads_redact_sdk_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:

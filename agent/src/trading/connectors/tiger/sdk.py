@@ -24,8 +24,10 @@ import math
 import os
 import re
 import tempfile
+import threading
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
@@ -198,6 +200,21 @@ TIGER_ACCOUNT_READ_SPECS: dict[str, dict[str, TigerReadSpec]] = {
             "get_option_exercise_positions",
             frozenset({"exercise_type", "lang"}),
             frozenset({"exercise_type"}),
+        ),
+        "option_exercise_check": TigerReadSpec(
+            "check_option_exercise",
+            frozenset(
+                {
+                    "contract_id",
+                    "exercise_type",
+                    "quantity",
+                    "executing_date",
+                    "is_force",
+                    "itm_rate",
+                    "lang",
+                }
+            ),
+            frozenset({"contract_id", "exercise_type"}),
         ),
         "transfer_records": TigerReadSpec(
             "get_position_transfer_records",
@@ -509,7 +526,18 @@ def get_open_orders(config: TigerConfig | None = None, *, include_executions: bo
         ),
     }
     if include_executions:
-        filled = _safe_call(trade, "get_filled_orders", account=cfg.account) or _safe_call(trade, "get_filled_orders")
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=90)
+        time_params = {
+            "start_time": int(start_time.timestamp() * 1000),
+            "end_time": int(end_time.timestamp() * 1000),
+        }
+        filled = _safe_call(
+            trade,
+            "get_filled_orders",
+            account=cfg.account,
+            **time_params,
+        ) or _safe_call(trade, "get_filled_orders", **time_params)
         result["executions"] = _redact_account_fields(
             [_order_to_dict(item) for item in _as_iter(filled)]
         )
@@ -532,7 +560,7 @@ def get_quote(symbol: str, *, config: TigerConfig | None = None, **_: Any) -> di
 # ``1H``/``1D``/``1W`` alias the lowercase tokens; ``1m`` vs ``1M`` stays case-sensitive.
 _PERIOD_MAP = {
     "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
-    "1h": "60min", "1H": "60min", "4h": "60min", "4H": "60min",
+    "1h": "60min", "1H": "60min", "4h": "4hour", "4H": "4hour",
     "1d": "day", "1D": "day", "1w": "week", "1W": "week", "1M": "month",
 }
 
@@ -562,23 +590,26 @@ def get_historical_bars(
 
 
 def get_option_expirations(
-    symbol: str,
+    symbols: str | list[str],
     *,
     config: TigerConfig | None = None,
     market: str = "US",
 ) -> dict[str, Any]:
-    """Read available option expiration dates for an underlying symbol."""
+    """Read available option expiration dates for up to 30 underlyings."""
     cfg = config or load_config()
     _assert_profile(cfg)
-    clean_symbol = _required_symbol(symbol)
+    clean_symbols = _bounded_text_list(symbols, name="symbols", maximum=30, upper=True)
     clean_market = _market_token(market)
-    rows = _quote_client(cfg).get_option_expirations([clean_symbol], market=clean_market)
-    return {
+    rows = _quote_client(cfg).get_option_expirations(clean_symbols, market=clean_market)
+    result = {
         "status": "ok",
-        "symbol": clean_symbol,
+        "symbols": clean_symbols,
         "market": clean_market,
         "expirations": _records(rows),
     }
+    if isinstance(symbols, str):
+        result["symbol"] = clean_symbols[0]
+    return result
 
 
 def get_option_chain(
@@ -589,8 +620,9 @@ def get_option_chain(
     market: str = "US",
     return_greeks: bool = True,
     timezone: str | None = None,
+    option_filter: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Read an option chain, including Greeks when requested."""
+    """Read an option chain, including official filters and optional Greeks."""
     cfg = config or load_config()
     _assert_profile(cfg)
     clean_symbol = _required_symbol(symbol)
@@ -601,6 +633,7 @@ def get_option_chain(
     rows = _quote_client(cfg).get_option_chain(
         clean_symbol,
         clean_expiry,
+        option_filter=_option_filter(option_filter),
         return_greek_value=bool(return_greeks),
         market=clean_market,
         timezone=_optional_text(timezone),
@@ -612,6 +645,202 @@ def get_option_chain(
         "market": clean_market,
         "options": _records(rows),
     }
+
+
+def get_option_symbols(
+    *,
+    config: TigerConfig | None = None,
+    market: str = "HK",
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Read option-underlying symbol mappings, including Hong Kong mappings."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_market = _market_token(market)
+    rows = _quote_client(cfg).get_option_symbols(market=clean_market, lang=_optional_text(lang))
+    return {"status": "ok", "market": clean_market, "symbols": _records(rows)}
+
+
+def get_option_briefs(
+    identifiers: str | list[str],
+    *,
+    config: TigerConfig | None = None,
+    market: str = "US",
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Read real-time quotes for up to 30 option contracts."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_identifiers = _bounded_text_list(identifiers, name="identifiers", maximum=30)
+    clean_market = _market_token(market)
+    rows = _quote_client(cfg).get_option_briefs(
+        clean_identifiers,
+        market=clean_market,
+        timezone=_optional_text(timezone),
+    )
+    return {"status": "ok", "market": clean_market, "options": _records(rows)}
+
+
+def get_option_bars(
+    identifiers: str | list[str],
+    *,
+    config: TigerConfig | None = None,
+    begin_time: str | int = -1,
+    end_time: str | int = 4070880000000,
+    period: str = "day",
+    limit: int | None = None,
+    sort_dir: str | None = None,
+    market: str = "US",
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Read historical option bars for up to 30 contracts."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_identifiers = _bounded_text_list(identifiers, name="identifiers", maximum=30)
+    clean_market = _market_token(market)
+    params = {
+        "begin_time": begin_time,
+        "end_time": end_time,
+        "period": _option_bar_period(period),
+        "limit": _bounded_optional_limit(limit, maximum=1200),
+        "sort_dir": _optional_text(sort_dir, upper=True),
+        "market": clean_market,
+        "timezone": _optional_text(timezone),
+    }
+    rows = _quote_client(cfg).get_option_bars(clean_identifiers, **params)
+    return {"status": "ok", "market": clean_market, "bars": _records(rows)}
+
+
+def get_option_depth(
+    identifiers: str | list[str],
+    *,
+    config: TigerConfig | None = None,
+    market: str = "US",
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Read option order-book depth for up to 30 contracts."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_identifiers = _bounded_text_list(identifiers, name="identifiers", maximum=30)
+    clean_market = _market_token(market)
+    depth = _quote_client(cfg).get_option_depth(
+        clean_identifiers,
+        market=clean_market,
+        timezone=_optional_text(timezone),
+    )
+    return {"status": "ok", "market": clean_market, "depth": _json_safe(depth)}
+
+
+def get_option_trade_ticks(
+    identifiers: str | list[str],
+    *,
+    config: TigerConfig | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Read option trade ticks for up to 30 contracts."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_identifiers = _bounded_text_list(identifiers, name="identifiers", maximum=30)
+    rows = _quote_client(cfg).get_option_trade_ticks(
+        clean_identifiers,
+        timezone=_optional_text(timezone),
+    )
+    return {"status": "ok", "ticks": _records(rows)}
+
+
+def get_option_timeline(
+    identifiers: str | list[str],
+    *,
+    config: TigerConfig | None = None,
+    market: str = "US",
+    begin_time: str | int | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Read intraday option timelines for up to 30 contracts."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_identifiers = _bounded_text_list(identifiers, name="identifiers", maximum=30)
+    clean_market = _market_token(market)
+    rows = _quote_client(cfg).get_option_timeline(
+        clean_identifiers,
+        market=clean_market,
+        begin_time=_optional_value(begin_time),
+        timezone=_optional_text(timezone),
+    )
+    return {"status": "ok", "market": clean_market, "timeline": _records(rows)}
+
+
+def get_option_analysis(
+    symbols: list[str] | list[dict[str, Any]],
+    *,
+    config: TigerConfig | None = None,
+    period: str = "52week",
+    market: str = "US",
+    require_volatility_list: bool | None = None,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Read option volatility analysis for up to 10 underlyings."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_symbols = _option_analysis_symbols(symbols)
+    clean_market = _market_token(market)
+    rows = _quote_client(cfg).get_option_analysis(
+        clean_symbols,
+        period=_option_analysis_period(period),
+        market=clean_market,
+        require_volatility_list=require_volatility_list,
+        lang=_optional_text(lang),
+    )
+    return {"status": "ok", "market": clean_market, "analysis": _records(rows)}
+
+
+def get_option_contract(
+    symbol: str,
+    *,
+    config: TigerConfig | None = None,
+    currency: str | None = None,
+    exchange: str | None = None,
+    expiry: str | None = None,
+    strike: float | None = None,
+    put_call: str | None = None,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Read one option contract without exposing trading mutations."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    contract = _trade_client(cfg).get_contract(
+        symbol=_required_symbol(symbol),
+        sec_type="OPT",
+        currency=_optional_text(currency, upper=True),
+        exchange=_optional_text(exchange, upper=True),
+        expiry=_optional_text(expiry),
+        strike=strike,
+        put_call=_optional_text(put_call, upper=True),
+        lang=_optional_text(lang),
+    )
+    return {"status": "ok", "contract": _json_safe(contract)}
+
+
+def get_option_derivative_contracts(
+    symbol: str,
+    expiry: str,
+    *,
+    config: TigerConfig | None = None,
+    sec_type: str = "OPT",
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Read option, warrant, or CBBC derivative contracts for an underlying."""
+    cfg = config or load_config()
+    _assert_profile(cfg)
+    clean_sec_type = _derivative_security_type(sec_type)
+    clean_expiry = _required_text(expiry, "expiry")
+    contracts = _trade_client(cfg).get_derivative_contracts(
+        symbol=_required_symbol(symbol),
+        sec_type=clean_sec_type,
+        expiry=clean_expiry,
+        lang=_optional_text(lang),
+    )
+    return {"status": "ok", "sec_type": clean_sec_type, "contracts": _records(contracts)}
 
 
 def get_market_status(
@@ -776,8 +1005,8 @@ def get_transactions(
     market: str = "ALL",
     symbol: str | None = None,
     order_id: int | None = None,
-    start_time: int | None = None,
-    end_time: int | None = None,
+    start_time: str | int | None = None,
+    end_time: str | int | None = None,
     limit: int = 100,
     sec_type: str | None = None,
     page_token: str | None = None,
@@ -1223,11 +1452,57 @@ def _trade_client(cfg: TigerConfig):
     return TradeClient(_client_config(cfg))
 
 
+_QUOTE_CLIENT_CACHE_MAXSIZE = 16
+_QUOTE_CLIENT_CACHE: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
+_QUOTE_CLIENT_CACHE_LOCK = threading.Lock()
+
+
+def _credential_revision(path_value: str) -> int | None:
+    if not path_value:
+        return None
+    try:
+        return Path(path_value).expanduser().stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _quote_client_cache_key(cfg: TigerConfig) -> tuple[Any, ...]:
+    return (
+        cfg.tiger_id,
+        cfg.account,
+        cfg.profile,
+        cfg.timeout,
+        cfg.credential_source,
+        cfg.properties_path,
+        _credential_revision(cfg.properties_path),
+        cfg.private_key_path,
+        _credential_revision(cfg.private_key_path),
+    )
+
+
+def _clear_quote_client_cache() -> None:
+    """Clear cached quote clients, primarily for credential rotation and tests."""
+    with _QUOTE_CLIENT_CACHE_LOCK:
+        _QUOTE_CLIENT_CACHE.clear()
+
+
 def _quote_client(cfg: TigerConfig):
     _require_tigeropen()
-    from tigeropen.quote.quote_client import QuoteClient  # type: ignore
+    key = _quote_client_cache_key(cfg)
+    with _QUOTE_CLIENT_CACHE_LOCK:
+        client = _QUOTE_CLIENT_CACHE.get(key)
+        if client is not None:
+            _QUOTE_CLIENT_CACHE.move_to_end(key)
+            return client
 
-    return QuoteClient(_client_config(cfg))
+        from tigeropen.quote.quote_client import QuoteClient  # type: ignore
+
+        client = QuoteClient(_client_config(cfg))
+        _QUOTE_CLIENT_CACHE[key] = client
+        _QUOTE_CLIENT_CACHE.move_to_end(key)
+        while len(_QUOTE_CLIENT_CACHE) > _QUOTE_CLIENT_CACHE_MAXSIZE:
+            _QUOTE_CLIENT_CACHE.popitem(last=False)
+        return client
 
 
 def _assert_profile(cfg: TigerConfig) -> None:
@@ -1307,13 +1582,115 @@ def _redact_account_fields(value: Any) -> Any:
 
 
 _ALLOWED_MARKETS = frozenset({"US", "HK", "CN", "SG", "AU"})
+_OPTION_FILTER_FIELDS = frozenset(
+    {
+        "implied_volatility_min",
+        "implied_volatility_max",
+        "open_interest_min",
+        "open_interest_max",
+        "delta_min",
+        "delta_max",
+        "gamma_min",
+        "gamma_max",
+        "theta_min",
+        "theta_max",
+        "vega_min",
+        "vega_max",
+        "rho_min",
+        "rho_max",
+        "in_the_money",
+    }
+)
+_OPTION_BAR_PERIODS = frozenset({"day", "1min", "5min", "30min", "60min"})
+_OPTION_ANALYSIS_PERIODS = frozenset({"3year", "52week", "26week", "13week"})
+_DERIVATIVE_SECURITY_TYPES = frozenset({"OPT", "WAR", "IOPT"})
+
+
+def _required_text(value: Any, name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{name} is required")
+    if len(text) > 256:
+        raise ValueError(f"{name} is too long")
+    return text
 
 
 def _required_symbol(value: Any) -> str:
-    symbol = str(value or "").strip().upper()
-    if not symbol:
-        raise ValueError("symbol is required")
-    return symbol
+    return _required_text(value, "symbol").upper()
+
+
+def _bounded_text_list(
+    value: str | list[str] | tuple[str, ...],
+    *,
+    name: str,
+    maximum: int,
+    upper: bool = False,
+) -> list[str]:
+    values = [value] if isinstance(value, str) else list(value or [])
+    if not values:
+        raise ValueError(f"{name} is required")
+    if len(values) > maximum:
+        raise ValueError(f"{name} must contain at most {maximum} items")
+    if not all(isinstance(item, str) for item in values):
+        raise ValueError(f"{name} must contain only strings")
+    result = [_required_text(item, name) for item in values]
+    return [item.upper() for item in result] if upper else result
+
+
+def _option_filter(value: Mapping[str, Any] | None) -> Any:
+    if not value:
+        return None
+    unknown = set(value) - _OPTION_FILTER_FIELDS
+    if unknown:
+        raise ValueError(f"unsupported option filter fields: {', '.join(sorted(unknown))}")
+    from tigeropen.quote.domain.filter import OptionFilter  # type: ignore
+
+    return OptionFilter(**dict(value))
+
+
+def _option_bar_period(value: Any) -> str:
+    period = _required_text(value, "period")
+    if period not in _OPTION_BAR_PERIODS:
+        raise ValueError(f"option period must be one of {', '.join(sorted(_OPTION_BAR_PERIODS))}")
+    return period
+
+
+def _option_analysis_period(value: Any) -> str:
+    period = _required_text(value, "period")
+    if period not in _OPTION_ANALYSIS_PERIODS:
+        raise ValueError(
+            f"option analysis period must be one of {', '.join(sorted(_OPTION_ANALYSIS_PERIODS))}"
+        )
+    return period
+
+
+def _option_analysis_symbols(value: Any) -> list[str] | list[dict[str, str]]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("symbols must be a non-empty list")
+    if len(value) > 10:
+        raise ValueError("symbols must contain at most 10 items")
+    result: list[str | dict[str, str]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            unknown = set(item) - {"symbol", "period"}
+            if unknown:
+                raise ValueError(f"unsupported option analysis fields: {', '.join(sorted(unknown))}")
+            entry = {"symbol": _required_symbol(item.get("symbol"))}
+            if item.get("period") is not None:
+                entry["period"] = _option_analysis_period(item["period"])
+            result.append(entry)
+        else:
+            result.append(_required_symbol(item))
+    return result  # type: ignore[return-value]
+
+
+def _derivative_security_type(value: Any) -> str:
+    sec_type = _required_text(value, "sec_type").upper()
+    if sec_type not in _DERIVATIVE_SECURITY_TYPES:
+        raise ValueError(
+            f"sec_type must be one of {', '.join(sorted(_DERIVATIVE_SECURITY_TYPES))}"
+        )
+    return sec_type
 
 
 def _market_token(value: Any, *, allow_all: bool = False) -> str:
@@ -1330,6 +1707,8 @@ def _optional_text(value: Any, *, upper: bool = False) -> str | None:
     text = str(value).strip()
     if not text:
         return None
+    if len(text) > 256:
+        raise ValueError("text value is too long")
     return text.upper() if upper else text
 
 
@@ -1345,6 +1724,10 @@ def _bounded_limit(value: Any, *, maximum: int) -> int:
     if limit < 1 or limit > maximum:
         raise ValueError(f"limit must be between 1 and {maximum}")
     return limit
+
+
+def _bounded_optional_limit(value: Any, *, maximum: int) -> int | None:
+    return None if value in (None, "") else _bounded_limit(value, maximum=maximum)
 
 
 def _json_safe(value: Any) -> Any:

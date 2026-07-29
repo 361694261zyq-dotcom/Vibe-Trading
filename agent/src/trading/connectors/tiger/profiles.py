@@ -12,8 +12,16 @@ from __future__ import annotations
 from src.trading.types import READ_CAPABILITIES, TradingProfile
 
 TIGER_EXTENDED_READ_CAPABILITIES = (
+    "options.symbols.read",
     "options.expirations.read",
     "options.chain.read",
+    "options.quotes.read",
+    "options.history.read",
+    "options.depth.read",
+    "options.ticks.read",
+    "options.timeline.read",
+    "options.analysis.read",
+    "options.contracts.read",
     "market.status.read",
     "market.calendar.read",
     "market.depth.read",

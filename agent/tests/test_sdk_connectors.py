@@ -8,6 +8,7 @@ and the service dispatch degrading cleanly when nothing is configured.
 
 from __future__ import annotations
 
+import datetime
 import json
 from types import SimpleNamespace
 
@@ -941,6 +942,48 @@ class _ExtendedTigerQuote:
         self.calls.append(("chain", {"symbol": symbol, "expiry": expiry, **kwargs}))
         return pd.DataFrame([{"identifier": "AAPL  260918C00200000", "strike": 200.0, "put_call": "CALL"}])
 
+    def get_option_symbols(self, market=None, lang=None):
+        self.calls.append(("option_symbols", {"market": market, "lang": lang}))
+        return pd.DataFrame([{"symbol": "TCH.HK", "underlying_symbol": "00700"}])
+
+    def get_option_briefs(self, identifiers, market=None, timezone=None):
+        self.calls.append(
+            ("option_briefs", {"identifiers": identifiers, "market": market, "timezone": timezone})
+        )
+        return pd.DataFrame([{"identifier": identifiers[0], "latest_price": 12.5}])
+
+    def get_option_bars(self, identifiers, **kwargs):
+        self.calls.append(("option_bars", {"identifiers": identifiers, **kwargs}))
+        return pd.DataFrame([{"identifier": identifiers[0], "close": 12.5}])
+
+    def get_option_depth(self, identifiers, market=None, timezone=None):
+        self.calls.append(
+            ("option_depth", {"identifiers": identifiers, "market": market, "timezone": timezone})
+        )
+        return {identifiers[0]: {"asks": [(12.6, 10)], "bids": [(12.4, 8)]}}
+
+    def get_option_trade_ticks(self, identifiers, timezone=None):
+        self.calls.append(("option_ticks", {"identifiers": identifiers, "timezone": timezone}))
+        return pd.DataFrame([{"identifier": identifiers[0], "price": 12.5}])
+
+    def get_option_timeline(self, identifiers, market=None, begin_time=None, timezone=None):
+        self.calls.append(
+            (
+                "option_timeline",
+                {
+                    "identifiers": identifiers,
+                    "market": market,
+                    "begin_time": begin_time,
+                    "timezone": timezone,
+                },
+            )
+        )
+        return pd.DataFrame([{"identifier": identifiers[0], "price": 12.5}])
+
+    def get_option_analysis(self, symbols, **kwargs):
+        self.calls.append(("option_analysis", {"symbols": symbols, **kwargs}))
+        return [SimpleNamespace(symbol="AAPL", implied_vol_30_days=0.25)]
+
     def get_market_status(self, market=None):
         self.calls.append(("status", {"market": market}))
         return [SimpleNamespace(market=market, trading_status="TRADING", open_time="09:30")]
@@ -966,9 +1009,41 @@ def test_tiger_extended_quote_reads_are_json_serializable(monkeypatch) -> None:
     monkeypatch.setattr(tg, "_quote_client", lambda cfg: quote)
     cfg = _tiger_paper_config()
 
+    identifier = "AAPL  260918C00200000"
     payloads = [
-        tg.get_option_expirations("AAPL", config=cfg, market="US"),
-        tg.get_option_chain("AAPL", "2026-09-18", config=cfg, market="US", return_greeks=True),
+        tg.get_option_expirations(["AAPL", "TSLA"], config=cfg, market="US"),
+        tg.get_option_chain(
+            "AAPL",
+            "2026-09-18",
+            config=cfg,
+            market="US",
+            return_greeks=True,
+            option_filter={
+                "delta_min": 0.2,
+                "open_interest_min": 100,
+                "in_the_money": True,
+            },
+        ),
+        tg.get_option_symbols(config=cfg, market="HK", lang="zh_CN"),
+        tg.get_option_briefs([identifier], config=cfg, market="US", timezone="US/Eastern"),
+        tg.get_option_bars(
+            [identifier],
+            config=cfg,
+            market="US",
+            period="day",
+            begin_time="2026-07-01",
+            end_time="2026-07-31",
+            limit=30,
+            sort_dir="DESC",
+        ),
+        tg.get_option_depth([identifier], config=cfg, market="US"),
+        tg.get_option_trade_ticks([identifier], config=cfg, timezone="US/Eastern"),
+        tg.get_option_timeline(
+            [identifier], config=cfg, market="US", begin_time="2026-07-28", timezone="US/Eastern"
+        ),
+        tg.get_option_analysis(
+            ["AAPL"], config=cfg, market="US", period="52week", require_volatility_list=True
+        ),
         tg.get_market_status(config=cfg, market="US"),
         tg.get_trading_calendar(config=cfg, market="US", begin_date="2026-07-01", end_date="2026-07-31"),
         tg.get_depth_quote("AAPL", config=cfg, market="US", trade_session="regular"),
@@ -980,10 +1055,150 @@ def test_tiger_extended_quote_reads_are_json_serializable(monkeypatch) -> None:
         json.dumps(payload, allow_nan=False)
     assert payloads[0]["expirations"][0]["date"] == "2026-09-18"
     assert payloads[1]["options"][0]["strike"] == 200.0
+    assert payloads[2]["symbols"][0]["underlying_symbol"] == "00700"
+    assert payloads[3]["options"][0]["latest_price"] == 12.5
+    assert payloads[4]["bars"][0]["close"] == 12.5
+    assert payloads[8]["analysis"][0]["symbol"] == "AAPL"
     assert payloads[-1]["ticks"][0]["price"] == 200.0
-    assert quote.calls[0][1]["symbols"] == ["AAPL"]
-    assert quote.calls[4][1]["symbols"] == ["AAPL"]
-    assert quote.calls[5][1]["symbols"] == ["AAPL"]
+    assert quote.calls[0][1]["symbols"] == ["AAPL", "TSLA"]
+    assert vars(quote.calls[1][1]["option_filter"])["delta_min"] == 0.2
+    assert quote.calls[11][1]["symbols"] == ["AAPL"]
+    assert quote.calls[12][1]["symbols"] == ["AAPL"]
+
+
+def test_tiger_option_expirations_preserve_single_symbol_response(monkeypatch) -> None:
+    """Keep the legacy symbol field for scalar expiration queries."""
+    quote = _ExtendedTigerQuote()
+    monkeypatch.setattr(tg, "_quote_client", lambda cfg: quote)
+
+    result = tg.get_option_expirations("aapl", config=_tiger_paper_config())
+
+    assert result["symbol"] == "AAPL"
+    assert result["symbols"] == ["AAPL"]
+
+
+def test_tiger_option_reads_reject_unsafe_batch_and_filter_inputs(monkeypatch) -> None:
+    """Bound option batches and reject unknown OptionFilter fields."""
+    quote = _ExtendedTigerQuote()
+    monkeypatch.setattr(tg, "_quote_client", lambda cfg: quote)
+    cfg = _tiger_paper_config()
+
+    with pytest.raises(ValueError, match="at most 30"):
+        tg.get_option_expirations([f"SYM{index}" for index in range(31)], config=cfg)
+    with pytest.raises(ValueError, match="at most 30"):
+        tg.get_option_briefs([f"OPT{index}" for index in range(31)], config=cfg)
+    with pytest.raises(ValueError, match="unsupported option filter"):
+        tg.get_option_chain(
+            "AAPL",
+            "2026-09-18",
+            config=cfg,
+            option_filter={"private_key": "not-allowed"},
+        )
+
+
+def test_tiger_option_contract_and_exercise_check_are_read_only(monkeypatch) -> None:
+    """Query option contracts and exercise eligibility without mutations."""
+
+    class TradeClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def get_contract(self, **kwargs):  # noqa: ANN003, ANN201
+            self.calls.append(("contract", kwargs))
+            return SimpleNamespace(contract_id=123, symbol="AAPL", sec_type="OPT")
+
+        def get_derivative_contracts(self, **kwargs):  # noqa: ANN003, ANN201
+            self.calls.append(("derivatives", kwargs))
+            return [SimpleNamespace(contract_id=123, symbol="AAPL", sec_type="OPT")]
+
+        def check_option_exercise(self, **kwargs):  # noqa: ANN003, ANN201
+            self.calls.append(("exercise_check", kwargs))
+            return SimpleNamespace(can_exercise=True, account="20191106192858300")
+
+    trade = TradeClient()
+    monkeypatch.setattr(tg, "_trade_client", lambda cfg: trade)
+    cfg = _tiger_paper_config()
+
+    contract = tg.get_option_contract(
+        "AAPL",
+        config=cfg,
+        expiry="20260918",
+        strike=200.0,
+        put_call="CALL",
+        currency="USD",
+    )
+    derivatives = tg.get_option_derivative_contracts(
+        "AAPL", "20260918", config=cfg, sec_type="OPT", lang="en_US"
+    )
+    check = tg.query_account_domain(
+        "portfolio",
+        "option_exercise_check",
+        config=cfg,
+        contract_id=123,
+        exercise_type="EARLY",
+        quantity=1,
+    )
+
+    assert contract["contract"]["contract_id"] == 123
+    assert derivatives["contracts"][0]["sec_type"] == "OPT"
+    assert check["data"]["can_exercise"] is True
+    assert "20191106192858300" not in json.dumps(check)
+    assert trade.calls[0][1]["sec_type"] == "OPT"
+    assert trade.calls[2][1]["account"] == "20191106192858300"
+    assert all("secret_key" not in params for _, params in trade.calls)
+
+
+def test_tiger_quote_client_is_reused_per_credential_identity(monkeypatch) -> None:
+    """Create and permission-grab one QuoteClient per credential identity."""
+    created: list[object] = []
+
+    class QuoteClient:
+        def __init__(self, config) -> None:  # noqa: ANN001
+            self.config = config
+            created.append(config)
+
+    monkeypatch.setattr("tigeropen.quote.quote_client.QuoteClient", QuoteClient)
+    monkeypatch.setattr(tg, "_client_config", lambda cfg: SimpleNamespace(account=cfg.account))
+    tg._clear_quote_client_cache()
+    first = _tiger_paper_config()
+    second = tg.TigerConfig(
+        tiger_id=first.tiger_id,
+        private_key_path=first.private_key_path,
+        account="20191106192858301",
+        profile="paper",
+    )
+
+    assert tg._quote_client(first) is tg._quote_client(first)
+    assert tg._quote_client(second) is not tg._quote_client(first)
+    assert len(created) == 2
+    tg._clear_quote_client_cache()
+
+
+def test_tiger_quote_client_cache_is_bounded(monkeypatch) -> None:
+    """Bound cached quote clients across repeated account/profile changes."""
+    created: list[object] = []
+
+    class QuoteClient:
+        def __init__(self, config) -> None:  # noqa: ANN001
+            created.append(config)
+
+    monkeypatch.setattr("tigeropen.quote.quote_client.QuoteClient", QuoteClient)
+    monkeypatch.setattr(tg, "_client_config", lambda cfg: SimpleNamespace(account=cfg.account))
+    tg._clear_quote_client_cache()
+
+    first = _tiger_paper_config()
+    for index in range(tg._QUOTE_CLIENT_CACHE_MAXSIZE + 4):
+        cfg = tg.TigerConfig(
+            tiger_id=first.tiger_id,
+            private_key_path=first.private_key_path,
+            account=f"2019110619285{index:04d}",
+            profile="paper",
+        )
+        tg._quote_client(cfg)
+
+    assert len(created) == tg._QUOTE_CLIENT_CACHE_MAXSIZE + 4
+    assert len(tg._QUOTE_CLIENT_CACHE) == tg._QUOTE_CLIENT_CACHE_MAXSIZE
+    tg._clear_quote_client_cache()
 
 
 def test_tiger_json_safe_normalizes_pandas_missing_values() -> None:
@@ -1101,19 +1316,29 @@ def test_tiger_execution_payloads_apply_account_redaction(monkeypatch) -> None:
     """Apply account redaction to optional filled-order execution payloads."""
 
     class TradeClient:
+        def __init__(self) -> None:
+            self.filled_calls: list[dict] = []
+
         def get_open_orders(self, **kwargs):  # noqa: ANN003, ANN201
             del kwargs
             return []
 
         def get_filled_orders(self, **kwargs):  # noqa: ANN003, ANN201
-            del kwargs
+            self.filled_calls.append(kwargs)
             return [SimpleNamespace(id=1, account="20191106192858300")]
 
-    monkeypatch.setattr(tg, "_trade_client", lambda cfg: TradeClient())
+    trade = TradeClient()
+    monkeypatch.setattr(tg, "_trade_client", lambda cfg: trade)
     result = tg.get_open_orders(_tiger_paper_config(), include_executions=True)
 
     assert result["executions"][0]["order_id"] == 1
     assert "20191106192858300" not in json.dumps(result)
+    start = trade.filled_calls[0]["start_time"]
+    end = trade.filled_calls[0]["end_time"]
+    assert isinstance(start, int)
+    assert isinstance(end, int)
+    window = datetime.timedelta(milliseconds=end - start)
+    assert datetime.timedelta(days=89) <= window <= datetime.timedelta(days=90)
 
 
 def test_tiger_write_failures_redact_sdk_exception_details(monkeypatch) -> None:
@@ -1143,8 +1368,17 @@ def test_tiger_write_failures_redact_sdk_exception_details(monkeypatch) -> None:
 def test_tiger_profiles_advertise_extended_reads() -> None:
     """Advertise extended read capabilities on Tiger SDK profiles."""
     expected = {
+        "options.symbols.read",
         "options.expirations.read",
         "options.chain.read",
+        "options.quotes.read",
+        "options.history.read",
+        "options.depth.read",
+        "options.ticks.read",
+        "options.timeline.read",
+        "options.analysis.read",
+        "options.contracts.read",
+        "option.exercise.read",
         "market.status.read",
         "market.calendar.read",
         "market.depth.read",
