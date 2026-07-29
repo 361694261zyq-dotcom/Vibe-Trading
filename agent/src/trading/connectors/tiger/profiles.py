@@ -11,6 +11,26 @@ from __future__ import annotations
 
 from src.trading.types import READ_CAPABILITIES, TradingProfile
 
+TIGER_EXTENDED_READ_CAPABILITIES = (
+    "options.expirations.read",
+    "options.chain.read",
+    "market.status.read",
+    "market.calendar.read",
+    "market.depth.read",
+    "market.ticks.read",
+    "orders.history.read",
+    "transactions.read",
+    "accounts.managed.read",
+    "account.assets.detail.read",
+    "account.analytics.read",
+    "account.funds.read",
+    "positions.detail.read",
+    "transfers.read",
+    "option.exercise.read",
+    "orders.detail.read",
+)
+TIGER_READ_CAPABILITIES = READ_CAPABILITIES + TIGER_EXTENDED_READ_CAPABILITIES
+
 TIGER_PROFILES: tuple[TradingProfile, ...] = (
     TradingProfile(
         id="tiger-paper-sdk",
@@ -18,7 +38,7 @@ TIGER_PROFILES: tuple[TradingProfile, ...] = (
         label="Tiger Paper · TigerOpen",
         environment="paper",
         transport="broker_sdk",
-        capabilities=READ_CAPABILITIES,
+        capabilities=TIGER_READ_CAPABILITIES,
         readonly=True,
         config={"profile": "paper"},
         notes=(
@@ -33,7 +53,7 @@ TIGER_PROFILES: tuple[TradingProfile, ...] = (
         label="Tiger Live · TigerOpen Read-Only",
         environment="live",
         transport="broker_sdk",
-        capabilities=READ_CAPABILITIES,
+        capabilities=TIGER_READ_CAPABILITIES,
         readonly=True,
         config={"profile": "live-readonly"},
         notes="Reads a Tiger live account only. Order placement is not exposed in this profile.",
@@ -44,7 +64,7 @@ TIGER_PROFILES: tuple[TradingProfile, ...] = (
         label="Tiger Paper · TigerOpen Trade",
         environment="paper",
         transport="broker_sdk",
-        capabilities=READ_CAPABILITIES + ("orders.place",),
+        capabilities=TIGER_READ_CAPABILITIES + ("orders.place",),
         readonly=False,
         config={"profile": "paper"},
         notes=(
@@ -61,7 +81,7 @@ TIGER_PROFILES: tuple[TradingProfile, ...] = (
         label="Tiger Live · TigerOpen Trade",
         environment="live",
         transport="broker_sdk",
-        capabilities=READ_CAPABILITIES + ("orders.place.requires_mandate",),
+        capabilities=TIGER_READ_CAPABILITIES + ("orders.place.requires_mandate",),
         readonly=False,
         config={"profile": "live"},
         notes=(

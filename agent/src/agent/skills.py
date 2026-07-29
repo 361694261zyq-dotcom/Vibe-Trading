@@ -7,9 +7,14 @@ Uses progressive disclosure:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from src.agent.frontmatter import parse_frontmatter as _parse_frontmatter
+
+_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 @dataclass
@@ -52,9 +57,6 @@ class Skill:
             return None
 
 
-from src.agent.frontmatter import parse_frontmatter as _parse_frontmatter  # shared util
-
-
 def _load_skill_dir(dir_path: Path) -> Optional[Skill]:
     """Load a skill from a directory.
 
@@ -65,7 +67,11 @@ def _load_skill_dir(dir_path: Path) -> Optional[Skill]:
         Skill instance or None.
     """
     skill_file = dir_path / "SKILL.md"
-    if not skill_file.exists():
+    if dir_path.is_symlink() or skill_file.is_symlink() or not skill_file.exists():
+        return None
+    try:
+        skill_file.resolve().relative_to(dir_path.resolve())
+    except ValueError:
         return None
     try:
         text = skill_file.read_text(encoding="utf-8")
@@ -73,8 +79,8 @@ def _load_skill_dir(dir_path: Path) -> Optional[Skill]:
         return None
 
     meta, body = _parse_frontmatter(text)
-    name = meta.get("name", dir_path.name)
-    if not name:
+    name = str(meta.get("name", dir_path.name)).strip()
+    if not _SKILL_NAME_RE.fullmatch(name):
         return None
 
     return Skill(
@@ -88,6 +94,15 @@ def _load_skill_dir(dir_path: Path) -> Optional[Skill]:
 
 
 USER_SKILLS_DIR = Path.home() / ".vibe-trading" / "skills" / "user"
+AGENT_SKILLS_DIR = Path.home() / ".agents" / "skills"
+
+
+def _render_skill_content(skill: Skill) -> str:
+    """Wrap a skill body and qualify its relative support-file links."""
+    body = skill.body
+    for subdirectory in ("references", "scripts"):
+        body = body.replace(f"]({subdirectory}/", f"]({skill.name}/{subdirectory}/")
+    return f'<skill name="{skill.name}">\n{body}\n</skill>'
 
 
 class SkillsLoader:
@@ -97,31 +112,41 @@ class SkillsLoader:
         skills: Loaded skill list (bundled + user-created).
     """
 
-    def __init__(self, skills_dir: Optional[Path] = None,
-                 user_skills_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        skills_dir: Optional[Path] = None,
+        user_skills_dir: Optional[Path] = None,
+        agent_skills_dir: Optional[Path] = None,
+    ) -> None:
         """Initialize SkillsLoader.
 
         Args:
             skills_dir: Bundled skills directory path; defaults to agent/skills/.
-            user_skills_dir: User-created skills directory; defaults to ~/.vibe-trading/skills/user/.
+            user_skills_dir: Vibe user skills; defaults to ~/.vibe-trading/skills/user/.
+            agent_skills_dir: Shared Agent skills; defaults to ~/.agents/skills/.
         """
         self.skills_dir = skills_dir or Path(__file__).resolve().parents[1] / "skills"
         self._user_skills_dir = user_skills_dir or USER_SKILLS_DIR
+        self._agent_skills_dir = agent_skills_dir or AGENT_SKILLS_DIR
         self.skills: List[Skill] = []
         self._load()
 
     def _load(self) -> None:
         """Load all skill subdirectories from user and bundled directories.
 
-        User skills are loaded first so they override bundled skills with the same name
-        (e.g. after patch_skill copies and modifies a bundled skill).
+        Vibe user skills override shared Agent skills, which override bundled skills.
+        This keeps local patches authoritative while reusing installed official skills.
         """
         seen_names: set[str] = set()
-        for directory in (self._user_skills_dir, self.skills_dir):
-            if not directory or not directory.exists():
+        for directory in (
+            self._user_skills_dir,
+            self._agent_skills_dir,
+            self.skills_dir,
+        ):
+            if not directory or not directory.exists() or directory.is_symlink():
                 continue
             for path in sorted(directory.iterdir()):
-                if path.is_dir() and (path / "SKILL.md").exists():
+                if not path.is_symlink() and path.is_dir() and (path / "SKILL.md").exists():
                     skill = _load_skill_dir(path)
                     if skill and skill.name not in seen_names:
                         self.skills.append(skill)
@@ -167,16 +192,25 @@ class SkillsLoader:
         Returns:
             XML-wrapped full skill document, or an error message.
         """
+        if not _SKILL_NAME_RE.fullmatch(name):
+            return f"Error: Invalid skill name '{name}'"
+
+        # Recheck mutable roots first so mid-session installs preserve precedence.
+        for directory in (self._user_skills_dir, self._agent_skills_dir):
+            if not directory or not directory.exists() or directory.is_symlink():
+                continue
+            candidate = directory / name
+            if candidate.is_symlink():
+                continue
+            skill = _load_skill_dir(candidate)
+            if skill and skill.name == name:
+                self.skills = [item for item in self.skills if item.name != name]
+                self.skills.append(skill)
+                return _render_skill_content(skill)
+
         for skill in self.skills:
             if skill.name == name:
-                return f'<skill name="{name}">\n{skill.body}\n</skill>'
-
-        # Fallback: check user skills directory on disk (mid-session created skills)
-        if self._user_skills_dir:
-            skill = _load_skill_dir(self._user_skills_dir / name)
-            if skill:
-                self.skills.append(skill)
-                return f'<skill name="{name}">\n{skill.body}\n</skill>'
+                return _render_skill_content(skill)
 
         available = ", ".join(s.name for s in self.skills)
         return f"Error: Unknown skill '{name}'. Available: {available}"

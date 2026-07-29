@@ -60,6 +60,9 @@ REQUIRED_TOOL_NAMES = {
     "trading_orders",
     "trading_quote",
     "trading_history",
+    "trading_tiger_market",
+    "trading_tiger_activity",
+    "trading_tiger_account_read",
 }
 
 

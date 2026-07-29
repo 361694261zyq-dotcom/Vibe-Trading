@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.agent.skills import AGENT_SKILLS_DIR, USER_SKILLS_DIR
 from src.agent.tools import BaseTool
 from src.tools.path_utils import safe_path as _safe_path
 from src.tools.path_utils import safe_run_dir as _safe_run_dir
@@ -29,6 +30,14 @@ class ReadFileTool(BaseTool):
         "required": ["path"],
     }
     repeatable = True
+
+    def __init__(self, skill_roots: list[Path] | None = None) -> None:
+        bundled_skills = Path(__file__).resolve().parents[1] / "skills"
+        self._skill_roots = (
+            list(skill_roots)
+            if skill_roots is not None
+            else [USER_SKILLS_DIR, AGENT_SKILLS_DIR, bundled_skills]
+        )
 
     def execute(self, **kwargs: Any) -> str:
         """Read a file.
@@ -55,10 +64,12 @@ class ReadFileTool(BaseTool):
                     },
                     ensure_ascii=False,
                 )
-        # Read-only access to skills/
-        skills_dir = Path(__file__).resolve().parents[1] / "skills"
-        if skills_dir.exists():
-            allowed_roots.append(skills_dir.resolve())
+        # Read-only access to bundled, Vibe user, and shared Agent skills.
+        for skills_root in self._skill_roots:
+            if skills_root.exists() and not skills_root.is_symlink():
+                resolved_root = skills_root.resolve()
+                if resolved_root not in allowed_roots:
+                    allowed_roots.append(resolved_root)
 
         # Add configured extra file roots (VIBE_TRADING_ALLOWED_FILE_ROOTS)
         for extra_root in allowed_file_roots():

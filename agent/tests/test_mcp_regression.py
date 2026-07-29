@@ -174,6 +174,9 @@ def test_mcp_server_exposes_well_known_tool_names() -> None:
         "trading_orders",
         "trading_quote",
         "trading_history",
+        "trading_tiger_market",
+        "trading_tiger_activity",
+        "trading_tiger_account_read",
     }
     missing = expected - registered
     assert not missing, (

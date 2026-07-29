@@ -1125,6 +1125,95 @@ def trading_history(
     return registry.execute("trading_history", params)
 
 
+@mcp.tool
+def trading_tiger_market(
+    operation: str,
+    connection: str | None = None,
+    symbol: str | None = None,
+    expiry: str | None = None,
+    market: str | None = None,
+    return_greeks: bool = True,
+    timezone: str | None = None,
+    begin_date: str | None = None,
+    end_date: str | None = None,
+    trade_session: str | None = None,
+    begin_index: int | None = None,
+    end_index: int | None = None,
+    limit: int = 100,
+) -> str:
+    """Read Tiger option, market-status, calendar, depth, or tick data."""
+    params = {
+        "operation": operation,
+        "connection": connection,
+        "symbol": symbol,
+        "expiry": expiry,
+        "market": market,
+        "return_greeks": return_greeks,
+        "timezone": timezone,
+        "begin_date": begin_date,
+        "end_date": end_date,
+        "trade_session": trade_session,
+        "begin_index": begin_index,
+        "end_index": end_index,
+        "limit": limit,
+    }
+    return _get_registry().execute("trading_tiger_market", params)
+
+
+@mcp.tool
+def trading_tiger_activity(
+    operation: str,
+    connection: str | None = None,
+    market: str = "ALL",
+    symbol: str | None = None,
+    order_id: int | None = None,
+    start_time: int | str | None = None,
+    end_time: int | str | None = None,
+    limit: int = 100,
+    states: list[str] | None = None,
+    sec_type: str | None = None,
+    page_token: str | None = None,
+    since_date: str | None = None,
+    to_date: str | None = None,
+) -> str:
+    """Read Tiger historical orders or execution transactions with filters."""
+    params = {
+        "operation": operation,
+        "connection": connection,
+        "market": market,
+        "symbol": symbol,
+        "order_id": order_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "limit": limit,
+        "states": states,
+        "sec_type": sec_type,
+        "page_token": page_token,
+        "since_date": since_date,
+        "to_date": to_date,
+    }
+    return _get_registry().execute("trading_tiger_activity", params)
+
+
+@mcp.tool
+def trading_tiger_account_read(
+    group: str,
+    action: str,
+    connection: str | None = None,
+    params: dict[str, object] | None = None,
+) -> str:
+    """Read an allowlisted Tiger account, portfolio, or activity resource."""
+    return _get_registry().execute(
+        "trading_tiger_account_read",
+        {
+            "group": group,
+            "action": action,
+            "connection": connection,
+            "params": params or {},
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Swarm team tool
 # ---------------------------------------------------------------------------
