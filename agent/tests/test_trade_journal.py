@@ -8,6 +8,7 @@ filtering, and the analyze_trade_journal error/dispatch paths).
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from src.tools.trade_journal_parsers import (
     TradeRecord,
     _infer_market_from_symbol,
     _normalize_side,
+    _tiger_instrument,
+    _tiger_number,
     _qualify_a_share,
     _to_float,
     load_dataframe,
@@ -39,7 +42,15 @@ from src.tools.trade_journal_tool import (
 )
 
 
-def _rec(dt: str, symbol: str, side: str, qty: float, price: float, fee: float = 0.0) -> TradeRecord:
+def _rec(
+    dt: str,
+    symbol: str,
+    side: str,
+    qty: float,
+    price: float,
+    fee: float = 0.0,
+    multiplier: float = 1.0,
+) -> TradeRecord:
     return TradeRecord(
         datetime=dt,
         symbol=symbol,
@@ -50,6 +61,7 @@ def _rec(dt: str, symbol: str, side: str, qty: float, price: float, fee: float =
         amount=qty * price,
         fee=fee,
         market="china_a",
+        multiplier=multiplier,
     )
 
 
@@ -185,6 +197,99 @@ def test_parse_file_generic_csv(tmp_path: Path) -> None:
     assert records[0].market == "us"
 
 
+def test_tiger_helpers_normalize_cn_symbols_and_reject_bad_numbers() -> None:
+    """Keep Tiger CN symbols compatible and reject corrupted numeric cells."""
+    assert _tiger_instrument("贵州茅台 (600519)", "CN") == ("600519.SH", "贵州茅台")
+    assert _tiger_instrument("宁德时代 (300750)", "CN") == ("300750.SZ", "宁德时代")
+    assert _tiger_instrument("北交所示例 (830799)", "CN") == ("830799.BJ", "北交所示例")
+    for invalid in ("not-a-number", "NaN", "Inf", "-Infinity"):
+        with pytest.raises(ValueError, match="Tiger row 42 has invalid price"):
+            _tiger_number(invalid, "price", 42)
+
+
+def test_parse_file_tiger_activity_statement(tmp_path: Path) -> None:
+    """Parse Tiger's multi-section activity statement without duplicate fill rows."""
+    statement = tmp_path / "tiger_statement.csv"
+    rows = [
+        ["活动报表", "", "", "", "2026-01-01 - 2026-07-28"],
+        ["账户总览", "", "", "DATA", "期初总览"],
+        [
+            "交易明细", "", "", "", "代码", "市场", "交易所", "交易类型",
+            "数量", "交易价格", "成交额", "交易费用", "佣金", "平台费",
+            "期权交收费", "已实现的损益", "说明", "成交时间", "交收日期", "币种",
+        ],
+        [
+            "交易明细", "期权", "", "DATA",
+            "阿里 260320 137.50 CALL (ALB.HK 20260320 CALL 137.5)",
+            "HK", "HKEX", "开仓", "5", "2.05", "5,125.00", "0", "-10.25",
+            "-15", "-15", "0", "", "2026-03-19\n09:51:38, GMT+8", "2026-03-20", "HKD",
+        ],
+        [
+            "交易明细", "期权", "", "DATA", "", "HK", "HKEX", "开仓",
+            "5", "2.05", "5,125.00", "0", "-10.25", "-15", "-15",
+            "2026-03-19\n09:51:38, GMT+8", "2026-03-20", "HKD",
+        ],
+        [
+            "交易明细", "期权", "", "TOTAL", "合计 ALB.HK", "", "", "", "5",
+        ],
+        [
+            "交易明细", "股票", "", "DATA", "豪威集团 (00501)", "HK", "HKEX",
+            "平仓", "-800", "12.50", "-10,000.00", "0", "-8", "-12", "0", "0", "",
+            "2026-07-20\n10:01:02, GMT+8", "2026-07-21", "HKD",
+        ],
+        ["期末持仓", "股票", "", "HEADER_DATA", "代码"],
+    ]
+    with statement.open("w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerows(rows)
+
+    fmt, records = parse_file(statement)
+
+    assert fmt == "tiger"
+    assert len(records) == 2
+    option, stock = records
+    assert option.symbol == "ALB.HK 20260320 CALL 137.5"
+    assert option.name == "阿里 260320 137.50 CALL"
+    assert option.side == "buy"
+    assert option.quantity == 5
+    assert option.amount == 5125
+    assert option.fee == pytest.approx(40.25)
+    assert option.multiplier == 500
+    assert option.datetime == "2026-03-19 09:51:38"
+    assert option.market == "hk"
+    assert stock.symbol == "00501.HK"
+    assert stock.side == "sell"
+    assert stock.quantity == 800
+    assert stock.amount == 10000
+    assert stock.fee == pytest.approx(20)
+
+
+def test_analyze_trade_journal_accepts_tiger_statement(allow_tmp: Path) -> None:
+    """Expose Tiger statement parsing through the existing analysis tool."""
+    statement = allow_tmp / "tiger_statement.csv"
+    rows = [
+        ["活动报表", "", "", "", "2026-01-01 - 2026-07-28"],
+        [
+            "交易明细", "", "", "", "代码", "市场", "交易所", "交易类型",
+            "数量", "交易价格", "成交额", "佣金", "已实现的损益", "说明",
+            "成交时间", "交收日期", "币种",
+        ],
+        [
+            "交易明细", "股票", "", "DATA", "Apple Inc. (AAPL)", "US", "NASDAQ",
+            "开仓", "10", "200", "2,000", "-1.99", "0", "",
+            "2026-07-20\n09:35:00, US/Eastern", "2026-07-21", "USD",
+        ],
+    ]
+    with statement.open("w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerows(rows)
+
+    result = json.loads(analyze_trade_journal(str(statement), analysis_type="profile"))
+
+    assert result["status"] == "ok"
+    assert result["format_detected"] == "tiger"
+    assert result["total_records"] == 1
+    assert result["market"] == "us"
+
+
 def test_parse_file_tonghuashun_csv(tmp_path: Path) -> None:
     csv = tmp_path / "ths.csv"
     csv.write_text(
@@ -258,6 +363,40 @@ def test_fifo_single_roundtrip_pnl() -> None:
     assert trip["pnl_pct"] == 0.2  # 200 / (10*100)
     assert trip["hold_days"] == 10.0
     assert trip["qty"] == 100
+
+
+def test_fifo_applies_option_contract_multiplier() -> None:
+    """Scale option round-trip PnL and cost by the contract multiplier."""
+    rts = pair_trades_fifo(
+        _df(
+            [
+                _rec("2026-01-01 10:00:00", "OPT", "buy", 5, 4.10, multiplier=500),
+                _rec("2026-01-02 10:00:00", "OPT", "sell", 5, 3.67, multiplier=500),
+            ]
+        )
+    )
+
+    assert rts[0]["direction"] == "long"
+    assert rts[0]["pnl"] == pytest.approx(-1075)
+    assert rts[0]["pnl_pct"] == pytest.approx(-0.1049)
+
+
+def test_fifo_pairs_short_open_and_buy_to_cover() -> None:
+    """Include short option round trips instead of dropping opening sells."""
+    rts = pair_trades_fifo(
+        _df(
+            [
+                _rec("2026-01-01 10:00:00", "OPT", "sell", 2, 5.0, fee=10, multiplier=100),
+                _rec("2026-01-03 10:00:00", "OPT", "buy", 2, 3.0, fee=6, multiplier=100),
+            ]
+        )
+    )
+
+    assert len(rts) == 1
+    assert rts[0]["direction"] == "short"
+    assert rts[0]["hold_days"] == 2
+    assert rts[0]["pnl"] == pytest.approx(384)
+    assert rts[0]["pnl_pct"] == pytest.approx(0.384)
 
 
 def test_fifo_fee_allocation() -> None:

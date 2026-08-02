@@ -91,11 +91,13 @@ def extract_shadow_profile(
     trades_df = records_to_dataframe(records)
 
     roundtrips = pair_trades_fifo(trades_df)
-    total = len(roundtrips)
+    long_roundtrips = [rt for rt in roundtrips if rt.get("direction", "long") == "long"]
+    total = len(long_roundtrips)
     if total == 0:
-        raise ValueError("No complete buy→sell roundtrips found in journal.")
+        raise ValueError("No complete buy→sell long roundtrips found in journal.")
 
-    profitable = [rt for rt in roundtrips if rt["pnl"] > 0]
+    # Generated Shadow Account engines currently emit long-only positive weights.
+    profitable = [rt for rt in long_roundtrips if rt["pnl"] > 0]
     if len(profitable) < MIN_PROFITABLE_ROUNDTRIPS:
         raise ValueError(
             f"Insufficient profitable roundtrips: {len(profitable)} "

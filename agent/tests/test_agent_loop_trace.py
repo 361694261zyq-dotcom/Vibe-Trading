@@ -82,6 +82,34 @@ def test_tool_call_trace_redacts_args_and_structured_results(tmp_path: Path) -> 
     assert messages[0]["content"].count("secret-token") == 1
 
 
+def test_tool_result_context_keeps_up_to_fifty_thousand_characters(tmp_path: Path) -> None:
+    """Keep large position-like results intact up to the 50k context limit."""
+    agent = AgentLoop(
+        registry=_SecretRegistry(),  # type: ignore[arg-type]
+        llm=SimpleNamespace(),
+        max_iterations=1,
+    )
+    trace = TraceWriter(tmp_path / "trace")
+    messages: list[dict[str, Any]] = []
+    tc = SimpleNamespace(id="tc_large", name="trading_positions")
+    result = "x" * 50_100
+
+    agent._finalize_tool_result(
+        tc,
+        result,
+        1,
+        ContextBuilder,
+        messages,
+        trace,
+        [],
+        1,
+    )
+    trace.close()
+
+    assert loop_mod.TOOL_RESULT_LIMIT == 50_000
+    assert messages[0]["content"] == "x" * 50_000
+
+
 class _LongAnswerResponse:
     content = "final answer " * 10
     tool_calls: list[Any] = []

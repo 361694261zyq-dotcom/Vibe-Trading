@@ -64,6 +64,9 @@ data/minutes/
 data/overnight*.log
 data/*.log
 data/test_write.txt
+
+# Local broker statements contain account and transaction data
+data/Statement_*.csv
 agent/.pytest_tmp/
 agent/vibe_trading.egg-info/
 agent/vibe_trading_ai.egg-info/

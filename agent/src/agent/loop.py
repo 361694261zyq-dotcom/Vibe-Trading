@@ -52,7 +52,7 @@ from src.tools.redaction import redact_payload, redact_tool_result
 RUNS_DIR = get_runs_dir()
 SESSIONS_DIR = get_sessions_dir()
 KEEP_RECENT = 3
-TOOL_RESULT_LIMIT = 10_000
+TOOL_RESULT_LIMIT = 50_000
 LLM_USAGE_ARTIFACT = "llm_usage.json"
 
 COLLAPSE_PRESERVE_RECENT = 6
