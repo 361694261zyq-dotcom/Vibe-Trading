@@ -50,7 +50,7 @@ from src.tools.redaction import redact_payload
 RUNS_DIR = Path(__file__).resolve().parents[2] / "runs"
 SESSIONS_DIR = Path(__file__).resolve().parents[2] / "sessions"
 KEEP_RECENT = 3
-TOOL_RESULT_LIMIT = 10_000
+TOOL_RESULT_LIMIT = 50_000
 LLM_USAGE_ARTIFACT = "llm_usage.json"
 
 COLLAPSE_PRESERVE_RECENT = 6

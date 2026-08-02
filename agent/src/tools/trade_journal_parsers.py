@@ -1,7 +1,8 @@
 """Trade journal format adapters.
 
 Each parser normalizes one broker export format into a list of TradeRecord.
-Supported: Tonghuashun (同花顺), Eastmoney (东方财富), Futu (富途), generic CSV.
+Supported: Tiger activity statements, Tonghuashun (同花顺), Eastmoney
+(东方财富), Futu (富途), and generic CSV.
 
 Encoding fallback order for CSV: utf-8 → utf-8-sig → gbk → gb2312.
 Excel (.xlsx/.xls) always opens as utf-8 internally via openpyxl/xlrd.
@@ -9,6 +10,8 @@ Excel (.xlsx/.xls) always opens as utf-8 internally via openpyxl/xlrd.
 
 from __future__ import annotations
 
+import csv
+import math
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -23,7 +26,7 @@ _CURRENCY_TOKEN_RE = re.compile(
     r"(?i)(?<![A-Za-z])(?:USDT|USDC|USD|EUR|GBP|JPY|CNY|HKD)(?![A-Za-z])|[$€£¥￥]"
 )
 
-FormatName = str  # "tonghuashun" | "eastmoney" | "futu" | "generic" | "unknown"
+FormatName = str  # "tiger" | "tonghuashun" | "eastmoney" | "futu" | "generic" | "unknown"
 
 _A_SHARE_EXCHANGE_MAP = {
     # prefix → suffix; Shanghai Main + STAR, Shenzhen Main + SME + ChiNext, BSE
@@ -73,6 +76,7 @@ class TradeRecord:
         amount: Gross amount (quantity * price, pre-fee).
         fee: Total fees (commission + stamp + transfer).
         market: "china_a" / "us" / "hk" / "crypto" / "other".
+        multiplier: Contract multiplier used for notional and PnL calculations.
     """
 
     datetime: str
@@ -84,6 +88,7 @@ class TradeRecord:
     amount: float
     fee: float
     market: str
+    multiplier: float = 1.0
 
 
 # ---------------- File loading ----------------
@@ -547,6 +552,138 @@ _PARSERS = {
 }
 
 
+_TIGER_ACTIVITY_TYPES = frozenset({"股票", "期权"})
+_TIGER_DATETIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}")
+
+
+def _read_csv_rows(path: Path) -> list[list[str]]:
+    """Read a CSV with encoding fallback while preserving variable-width rows."""
+    last_error: Exception | None = None
+    for encoding in ("utf-8-sig", "utf-8", "utf-16", "gbk", "gb2312"):
+        try:
+            with path.open(encoding=encoding, newline="") as handle:
+                return list(csv.reader(handle))
+        except (UnicodeDecodeError, UnicodeError) as exc:
+            last_error = exc
+    raise ValueError(f"Failed to decode CSV with utf-8/utf-16/gbk/gb2312: {last_error}")
+
+
+def _tiger_instrument(raw: str, market: str) -> tuple[str, str]:
+    """Extract a stable symbol and display name from a Tiger instrument cell."""
+    text = raw.strip()
+    match = re.search(r"\(([^()]*)\)\s*$", text)
+    symbol = (match.group(1) if match else text).strip().upper()
+    name = text[: match.start()].strip() if match else text
+    if market == "HK" and symbol.isdigit():
+        symbol = f"{symbol.zfill(5)}.HK"
+    elif market == "CN":
+        symbol = _qualify_a_share(symbol)
+    return symbol, name
+
+
+def _tiger_datetime(raw: str) -> str:
+    """Normalize Tiger's multiline timezone-labelled execution timestamp."""
+    match = _TIGER_DATETIME_RE.search(" ".join(raw.split()))
+    return match.group(0) if match else " ".join(raw.split()).strip()
+
+
+def _tiger_number(raw: str, field: str, row_number: int, *, blank_zero: bool = False) -> float:
+    """Parse a Tiger numeric cell without silently accepting malformed values."""
+    text = _CURRENCY_TOKEN_RE.sub("", str(raw)).replace(",", "").strip()
+    if not text and blank_zero:
+        return 0.0
+    try:
+        value = float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Tiger row {row_number} has invalid {field}: {raw!r}") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"Tiger row {row_number} has invalid {field}: {raw!r}")
+    return value
+
+
+def parse_tiger_activity_statement(path: str | Path) -> list[TradeRecord] | None:
+    """Parse the order-level trade section from a Tiger activity statement.
+
+    Returns ``None`` when the CSV is not a Tiger activity statement. Tiger also
+    emits blank-instrument execution rows and ``TOTAL`` rows; those are omitted
+    because the preceding named ``DATA`` row already contains the order total.
+    """
+    p = Path(path)
+    if p.suffix.lower() != ".csv":
+        return None
+    rows = _read_csv_rows(p)
+    if not any(row and row[0].lstrip("\ufeff") == "活动报表" for row in rows[:5]):
+        return None
+
+    header = next(
+        (
+            row
+            for row in rows
+            if len(row) > 10
+            and row[0] == "交易明细"
+            and row[4] == "代码"
+            and "成交时间" in row
+        ),
+        None,
+    )
+    if header is None:
+        raise ValueError("Tiger activity statement has no trade-detail section")
+
+    columns = {name: index for index, name in enumerate(header) if name}
+    required = {"代码", "市场", "交易类型", "数量", "交易价格", "成交额", "成交时间"}
+    missing = sorted(required - columns.keys())
+    if missing:
+        raise ValueError(f"Tiger trade-detail section is missing columns: {missing}")
+
+    amount_index = columns["成交额"]
+    records: list[TradeRecord] = []
+    for row_number, row in enumerate(rows, start=1):
+        if (
+            len(row) < amount_index + 6
+            or row[0] != "交易明细"
+            or row[3] != "DATA"
+            or row[1] not in _TIGER_ACTIVITY_TYPES
+            or not row[columns["代码"]].strip()
+        ):
+            continue
+
+        market_code = row[columns["市场"]].strip().upper()
+        symbol, name = _tiger_instrument(row[columns["代码"]], market_code)
+        signed_quantity = _tiger_number(row[columns["数量"]], "quantity", row_number)
+        quantity = abs(signed_quantity)
+        price = abs(_tiger_number(row[columns["交易价格"]], "price", row_number))
+        amount = abs(_tiger_number(row[amount_index], "amount", row_number))
+        fees = sum(
+            _tiger_number(value, "fee", row_number, blank_zero=True)
+            for value in row[amount_index + 1 : -5]
+        )
+        if not symbol or quantity == 0:
+            continue
+        multiplier = amount / (price * quantity) if price and quantity else 1.0
+        market = {"US": "us", "HK": "hk", "CN": "china_a"}.get(
+            market_code,
+            "other",
+        )
+        records.append(
+            TradeRecord(
+                datetime=_tiger_datetime(row[-3]),
+                symbol=symbol,
+                name=name,
+                side="buy" if signed_quantity > 0 else "sell",
+                quantity=quantity,
+                price=price,
+                amount=amount,
+                fee=abs(fees),
+                market=market,
+                multiplier=multiplier,
+            )
+        )
+
+    if not records:
+        raise ValueError("Tiger activity statement contains no supported stock or option trades")
+    return records
+
+
 def parse_file(path: str | Path) -> tuple[FormatName, list[TradeRecord]]:
     """End-to-end: load file, detect format, parse.
 
@@ -560,6 +697,10 @@ def parse_file(path: str | Path) -> tuple[FormatName, list[TradeRecord]]:
     Raises:
         ValueError: Unknown format with no usable columns.
     """
+    tiger_records = parse_tiger_activity_statement(path)
+    if tiger_records is not None:
+        return "tiger", tiger_records
+
     df = load_dataframe(path)
     fmt = detect_format(df)
     if fmt == "unknown":

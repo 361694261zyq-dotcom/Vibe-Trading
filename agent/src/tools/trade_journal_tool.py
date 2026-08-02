@@ -41,35 +41,28 @@ def pair_trades_fifo(df: pd.DataFrame) -> list[dict[str, Any]]:
         List of dicts: symbol, buy_dt, sell_dt, qty, buy_price, sell_price,
         hold_days, pnl, pnl_pct. Unmatched positions are ignored.
     """
-    queues: dict[str, deque] = defaultdict(deque)
+    long_queues: dict[str, deque] = defaultdict(deque)
+    short_queues: dict[str, deque] = defaultdict(deque)
     roundtrips: list[dict[str, Any]] = []
 
-    for row in df.itertuples(index=False):
-        if row.side == "buy":
-            queues[row.symbol].append({
-                "dt": row.datetime,
-                "qty": row.quantity,
-                "price": row.price,
-                "fee": row.fee,
-            })
-            continue
-
-        # sell: match against oldest buys
+    def match(row: Any, queue: deque, direction: str) -> float:
         remaining = row.quantity
-        q = queues[row.symbol]
-        while remaining > 1e-9 and q:
-            lot = q[0]
+        while remaining > 1e-9 and queue:
+            lot = queue[0]
             take = min(lot["qty"], remaining)
             hold = (row.datetime - lot["dt"]).total_seconds() / 86400.0
-            gross = (row.price - lot["price"]) * take
-            # Proportional fee allocation
-            buy_fee = lot["fee"] * (take / lot["qty"]) if lot["qty"] else 0.0
-            sell_fee = row.fee * (take / row.quantity) if row.quantity else 0.0
-            pnl = gross - buy_fee - sell_fee
-            cost = lot["price"] * take
-            pnl_pct = pnl / cost if cost else 0.0
+            multiplier = lot["multiplier"]
+            price_delta = row.price - lot["price"]
+            gross = price_delta * take * multiplier
+            if direction == "short":
+                gross = -gross
+            entry_fee = lot["fee"] * (take / lot["qty"]) if lot["qty"] else 0.0
+            exit_fee = row.fee * (take / row.quantity) if row.quantity else 0.0
+            pnl = gross - entry_fee - exit_fee
+            cost = lot["price"] * take * multiplier
             roundtrips.append({
                 "symbol": row.symbol,
+                "direction": direction,
                 "buy_dt": lot["dt"],
                 "sell_dt": row.datetime,
                 "qty": take,
@@ -77,13 +70,29 @@ def pair_trades_fifo(df: pd.DataFrame) -> list[dict[str, Any]]:
                 "sell_price": row.price,
                 "hold_days": round(hold, 2),
                 "pnl": round(pnl, 2),
-                "pnl_pct": round(pnl_pct, 4),
+                "pnl_pct": round(pnl / cost if cost else 0.0, 4),
             })
-            lot["fee"] -= buy_fee
+            lot["fee"] -= entry_fee
             lot["qty"] -= take
             remaining -= take
             if lot["qty"] <= 1e-9:
-                q.popleft()
+                queue.popleft()
+        return remaining
+
+    for row in df.itertuples(index=False):
+        opposing = short_queues[row.symbol] if row.side == "buy" else long_queues[row.symbol]
+        direction = "short" if row.side == "buy" else "long"
+        remaining = match(row, opposing, direction)
+        if remaining <= 1e-9:
+            continue
+        own = long_queues[row.symbol] if row.side == "buy" else short_queues[row.symbol]
+        own.append({
+            "dt": row.datetime,
+            "qty": remaining,
+            "price": row.price,
+            "fee": row.fee * (remaining / row.quantity) if row.quantity else 0.0,
+            "multiplier": getattr(row, "multiplier", 1.0),
+        })
     return roundtrips
 
 
